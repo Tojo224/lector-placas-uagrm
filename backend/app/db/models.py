@@ -243,6 +243,8 @@ class SolicitudRegistroVehiculo(Base):
     imagen_id = Column(Uuid, ForeignKey("archivos_multimedia.id"), nullable=False)
     placa_sugerida = Column(String, nullable=False, index=True)
     confianza_placa = Column(Float, nullable=False)
+    color_sugerido = Column(String, nullable=True)
+    confianza_color = Column(Float, nullable=True)
     estado = Column(Enum(SolicitudRegistroEstadoEnum), nullable=False, default=SolicitudRegistroEstadoEnum.PENDING, index=True)
     creado_por_usuario_id = Column(Uuid, ForeignKey("usuarios.id"), nullable=False)
     revisado_por_usuario_id = Column(Uuid, ForeignKey("usuarios.id"), nullable=True)

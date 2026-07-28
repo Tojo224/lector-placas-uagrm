@@ -1,5 +1,14 @@
 # MEMORY
 
+## 2026-07-28 - Sugerencia de color vehicular
+
+- OpenCV/HSV analiza una ROI probable de carrocería solo al crear una solicitud no-realtime.
+- Se guardan `color_sugerido` y `confianza_color`; el operador siempre puede corregirlos.
+- Verificado: harness 44 OK, 5 pruebas específicas OK, build Vite OK y migración `c7d8e9f0a1b2` aplicada.
+- Revisión posterior: el endpoint de placas usa el resolvedor de autenticación
+  central para cookie/Bearer y ya no oculta fallos al persistir solicitudes.
+  Ocho pruebas específicas y smoke HTTP local pasaron.
+
 ## 2026-07-27 - Celular como Dispositivo de Cámara por WiFi + Simulador de Barrera SSE
 
 - **Configuración de red local**: `BACKEND_HOST` cambiado de `127.0.0.1` a `0.0.0.0` para que FastAPI escuche en todas las interfaces WiFi. `ALLOWED_ORIGINS` actualizado con `https://192.168.0.14:5173`. Vite configurado con `host: true` y `https: true` usando `@vitejs/plugin-basic-ssl`.

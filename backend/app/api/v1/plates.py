@@ -21,18 +21,12 @@ from app.db.models import (
 from app.services.image_processing import ImageProcessingService, ImageProcessingError
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.storage import StorageError
-from app.api.v1.auth import get_current_user
+from app.ai.vehicle_color import detect_vehicle_color
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.services.media_tasks import process_media_record, spool_directory
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db)) -> Usuario | None:
-    try:
-        return await get_current_user(request, db=db)
-    except Exception:
-        return None
-
 
 router = APIRouter()
 
@@ -272,11 +266,14 @@ async def analyze_plate_endpoint(
                     SolicitudRegistroVehiculo.estado == SolicitudRegistroEstadoEnum.PENDING,
                 ))
                 if not pending:
+                    color_suggestion = await run_in_threadpool(
+                        detect_vehicle_color, image_bytes, result_dict.get("plate_bbox")
+                    )
                     processed = await run_in_threadpool(ImageProcessingService().process, image_bytes, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     uploaded = await run_in_threadpool(CloudinaryStorage().upload, processed.content, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     media = ArchivoMultimedia(proveedor=MediaProviderEnum.CLOUDINARY, tipo=MediaTypeEnum.VEHICLE_REGISTRATION, estado=MediaStatusEnum.READY, asset_id=uploaded.asset_id, public_id=uploaded.public_id, resource_type=uploaded.resource_type, delivery_type=uploaded.delivery_type, formato=uploaded.format, ancho=uploaded.width, alto=uploaded.height, peso_bytes=uploaded.bytes, intentos=1)
                     db.add(media); await db.flush()
-                    solicitud = SolicitudRegistroVehiculo(escaneado_id=scan.id, imagen_id=media.id, placa_sugerida=normalized, confianza_placa=scan.confianza or 0.0, estado=SolicitudRegistroEstadoEnum.PENDING, creado_por_usuario_id=current_user.id)
+                    solicitud = SolicitudRegistroVehiculo(escaneado_id=scan.id, imagen_id=media.id, placa_sugerida=normalized, confianza_placa=scan.confianza or 0.0, color_sugerido=color_suggestion.color, confianza_color=color_suggestion.confidence, estado=SolicitudRegistroEstadoEnum.PENDING, creado_por_usuario_id=current_user.id)
                     db.add(solicitud); await db.flush(); solicitud_id = solicitud.id
                 else:
                     solicitud_id = pending.id
@@ -284,8 +281,16 @@ async def analyze_plate_endpoint(
         except (ImageProcessingError, StorageError):
             await db.rollback()
             raise HTTPException(status_code=503, detail="No se pudo guardar la evidencia de la solicitud")
-        except Exception:
+        except Exception as exc:
             await db.rollback()
+            logger.exception("No se pudo persistir el resultado del escaneo")
+            if (not realtime and status_val == "DETECTED" and normalized and
+                    result_dict.get("is_valid_bolivian_format", False) and
+                    vehicle is None and current_user is not None):
+                raise HTTPException(
+                    status_code=500,
+                    detail="No se pudo crear la solicitud de revisión",
+                ) from exc
 
     # Mapeo de la respuesta
     return PlateAnalysisResponse(

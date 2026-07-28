@@ -27,3 +27,11 @@
 - **ACCION REQUERIDA**: Reiniciar el backend para que tome OCR_QUANTIZE=true.
 - **Proximo paso**: Probar flujo completo celular -> OCR -> consulta placa. Considerar configurar ROI si la camara es fija (mayor ganancia adicional).
 - **Convension Dispositivo y Usuario**: El nombre del Dispositivo debe coincidir exactamente con el nombre del Usuario de rol DISPOSITIVO.
+- **Color vehicular fase 2**: la captura definitiva de una placa desconocida
+  calcula una sugerencia HSV sobre una ROI de carrocería, guarda color y
+  confianza y los prellena para revisión manual. Polling permanece intacto.
+- **Validación 2026-07-28**: 44 pruebas del harness, 5 pruebas específicas de
+  solicitudes/color y build Vite correctos. Migración `c7d8e9f0a1b2` aplicada.
+- **Flujo desconocido revisado**: se eliminó autenticación opcional duplicada
+  que podía perder el Bearer móvil; 8 pruebas específicas y smoke HTTP local
+  correctos (`health=ok`, OCR/Supervision disponibles, puerto liberado).

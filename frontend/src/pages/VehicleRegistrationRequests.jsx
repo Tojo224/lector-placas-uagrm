@@ -57,7 +57,8 @@ export default function VehicleRegistrationRequests() {
       placa: item.placa_sugerida,
       propietario_usuario_id: users[0]?.id || "",
       marca_id: brands[0]?.id || "",
-      tipo_vehiculo_id: types[0]?.id || ""
+      tipo_vehiculo_id: types[0]?.id || "",
+      color: item.color_sugerido || ""
     });
     setError("");
   };
@@ -140,6 +141,7 @@ export default function VehicleRegistrationRequests() {
               <p className="eyebrow" style={{ marginBottom: ".25rem" }}>{item.estado}</p>
               <h3 style={{ margin: 0 }}>{item.placa_sugerida}</h3>
               <p className="muted-text" style={{ margin: 0 }}>Confianza OCR: {Math.round(item.confianza_placa * 100)}%</p>
+              {item.color_sugerido && <p className="muted-text" style={{ margin: 0 }}>Color sugerido: {item.color_sugerido} ({Math.round((item.confianza_color || 0) * 100)}%)</p>}
             </div>
             <button type="button" onClick={() => open(item)} style={{ padding: ".65rem 1.2rem" }}>
               Revisar
@@ -198,6 +200,10 @@ export default function VehicleRegistrationRequests() {
               </label>
               <label>Color
                 <input value={form.color} onChange={e => update("color", e.target.value)} required />
+                <span className="field-hint">Sugerencia automática; verifica y corrige si es necesario.</span>
+              </label>
+              <label>Confianza del color
+                <input value={selected.color_sugerido ? `${Math.round((selected.confianza_color || 0) * 100)}%` : "Sin sugerencia"} readOnly />
               </label>
             </div>
             <div className="modal-actions">

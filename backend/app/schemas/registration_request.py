@@ -9,6 +9,8 @@ class SolicitudRegistroResponse(BaseModel):
     imagen_id: UUID
     placa_sugerida: str
     confianza_placa: float
+    color_sugerido: str | None = None
+    confianza_color: float | None = None
     estado: SolicitudRegistroEstadoEnum
     creado_por_usuario_id: UUID
     revisado_por_usuario_id: UUID | None = None
