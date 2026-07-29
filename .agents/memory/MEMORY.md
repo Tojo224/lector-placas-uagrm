@@ -1,5 +1,6 @@
 # MEMORY
 
+<<<<<<< HEAD
 ## 2026-07-28 — 4R Review completa + Fixes de seguridad y robustez + Cambios de Beto
 
 - **SDD Init**: Inicializado con engram (capture_prompt: false para artefactos automáticos). Strict TDD activado. Testing capabilities detectadas.
@@ -17,6 +18,13 @@
   - Se añadió soporte para cámaras USB y conexión del celular por USB.
 - **Backlog actualizado**: 7 nuevos items (SEC-011 a SEC-014, ROB-001 a ROB-003) marcados como done.
 - **Verificación**: Suite de pruebas aprobada.
+=======
+## 2026-07-28 - Integración de cambios de main y Beto
+
+- Se integraron las mejoras de seguridad, robustez y documentación de main con el flujo de Beto.
+- Se conservó el flujo de análisis de placas y la lógica de autenticación opcional para el endpoint de análisis.
+- Se mantuvo la trazabilidad de los cambios de la rama Beto para el flujo USB y cámara.
+>>>>>>> Beto
 
 ## 2026-07-27 - Celular como Dispositivo de Cámara por WiFi + Simulador de Barrera SSE
 
@@ -108,8 +116,14 @@
 - **Carga de Fotos de Vehículos (Vehicles.jsx / Profile.jsx)**: Se implementó la subida opcional de fotos privadas de vehículos al registrarlos o editarlos en el panel de gestión. Se añadió también la sección "Mis Vehículos Registrados" en la vista de perfil (`Profile.jsx`) para que los usuarios visualicen y carguen/eliminen fotos directamente desde allí.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> Stashed changes
+>>>>>>> Beto
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> origin/main
 >>>>>>> Beto
 ## 2026-07-25 - Validacion integral local/Docker, Neon, Cloudinary y datos operativos
 

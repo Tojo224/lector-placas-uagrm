@@ -106,7 +106,7 @@ function UploadPlate() {
       // Siempre detener el stream al re-ejecutar el efecto para evitar acumulación de streams
       stopCamera();
     };
-  }, [activeTab, activeModal === "snapshot"]);
+  }, [activeTab, activeModal]);
 
   const resetLookupState = () => {
     setLookupError("");
