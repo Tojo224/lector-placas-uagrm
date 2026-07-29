@@ -24,9 +24,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     # Local OCR pipeline configuration
-    OCR_LANGUAGES: str = "es,en"
     OCR_GPU: bool = False
-    OCR_QUANTIZE: bool = False
     OCR_CONFIDENCE_THRESHOLD: float = 0.55
     OCR_UPSCALE_FACTOR: float = 2.0
     OCR_USE_GRAYSCALE: bool = True
@@ -37,6 +35,10 @@ class Settings(BaseSettings):
     OCR_ROI_Y: int | None = None
     OCR_ROI_WIDTH: int | None = None
     OCR_ROI_HEIGHT: int | None = None
+
+    # Hugging Face CLIP Zero-Shot settings
+    HF_MODEL_NAME: str = "openai/clip-vit-base-patch32"
+    ENABLE_HF_CLASSIFICATION: bool = True
 
     # Local camera agent configuration. The agent runs as a separate process.
     CAMERA_INDEX: int = 0
@@ -70,12 +72,12 @@ class Settings(BaseSettings):
     @field_validator(
         "DEBUG",
         "OCR_GPU",
-        "OCR_QUANTIZE",
         "OCR_USE_GRAYSCALE",
         "OCR_USE_CONTRAST",
         "OCR_DENOISE",
         "OCR_USE_THRESHOLD",
         "CLOUDINARY_SECURE",
+        "ENABLE_HF_CLASSIFICATION",
         mode="before",
     )
     @classmethod

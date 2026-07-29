@@ -77,6 +77,9 @@ class PlatesAPITests(unittest.TestCase):
             "tipo_acceso": None,
             "es_registrado": False,
             "propietario_nombre": None,
+            "marca_sugerida": None,
+            "tipo_sugerido": None,
+            "color_sugerido": None,
         }
         image = np.zeros((20, 40, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)

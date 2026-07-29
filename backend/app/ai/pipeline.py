@@ -146,35 +146,44 @@ def _preprocess_image(image: np.ndarray) -> tuple[np.ndarray, float]:
     return processed, scale
 
 
-def _manual_easyocr_conversion(easyocr_results: list[Any]) -> sv.Detections:
-    if not easyocr_results:
+def _detections_from_paddle(paddle_results: list[Any]) -> sv.Detections:
+    """Convierte resultados de PaddleOCR al formato sv.Detections.
+
+    PaddleOCR devuelve una lista de:
+        [ [[x1,y1],[x2,y2],[x3,y3],[x4,y4]], (texto, confianza) ]
+
+    Se extrae el bounding box xyxy a partir del polígono cuadrilátero.
+    """
+    if not paddle_results:
         return sv.Detections.empty()
-    boxes = np.asarray([result[0] for result in easyocr_results], dtype=np.float32)
-    xyxy = np.hstack((np.min(boxes, axis=1), np.max(boxes, axis=1)))
-    confidence = np.asarray(
-        [float(result[2]) if len(result) > 2 else 0.0 for result in easyocr_results],
-        dtype=np.float32,
-    )
-    texts = np.asarray([str(result[1]) for result in easyocr_results])
-    return sv.Detections(
-        xyxy=xyxy,
-        confidence=confidence,
-        data={"class_name": texts},
-    )
 
+    boxes_xyxy: list[np.ndarray] = []
+    confidences: list[float] = []
+    texts: list[str] = []
 
-def _detections_from_easyocr(easyocr_results: list[Any]) -> sv.Detections:
-    converter = getattr(sv.Detections, "from_easyocr", None)
-    if converter is not None:
+    for item in paddle_results:
         try:
-            return converter(easyocr_results)
-        except (TypeError, ValueError, IndexError) as exc:
-            logger.warning("Supervision no pudo convertir EasyOCR; usando fallback: %s", exc)
-    return _manual_easyocr_conversion(easyocr_results)
+            box_pts, text_conf = item
+            text, conf = text_conf
+        except (TypeError, ValueError):
+            continue
+        pts = np.array(box_pts, dtype=np.float32)
+        x1 = float(pts[:, 0].min())
+        y1 = float(pts[:, 1].min())
+        x2 = float(pts[:, 0].max())
+        y2 = float(pts[:, 1].max())
+        boxes_xyxy.append(np.array([x1, y1, x2, y2], dtype=np.float32))
+        confidences.append(float(conf))
+        texts.append(str(text))
 
+    if not boxes_xyxy:
+        return sv.Detections.empty()
 
-
-
+    return sv.Detections(
+        xyxy=np.stack(boxes_xyxy),
+        confidence=np.array(confidences, dtype=np.float32),
+        data={"class_name": np.array(texts)},
+    )
 
 def _map_detections_to_image(
     detections: sv.Detections,
@@ -374,28 +383,43 @@ def _run_ocr(
     low_text: float = 0.4,
     realtime: bool = False,
 ) -> list:
-    """Ejecuta EasyOCR con parámetros optimizados para números de placa."""
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=".*'pin_memory' argument is set as true but no accelerator is found.*",
-            category=UserWarning,
-        )
-        # Mejora la localización de caracteres pequeños sin asumir el coste
-        # completo del modo estático.
-        mag_ratio = 1.25 if realtime else 1.5
-        width_ths = 1.5 if realtime else 2.0
-        return ocr_reader.readtext(
-            processed,
-            detail=1,
-            paragraph=False,
-            allowlist=OCR_ALLOWLIST,
-            text_threshold=text_threshold,
-            low_text=low_text,
-            width_ths=width_ths,
-            height_ths=0.5,
-            mag_ratio=mag_ratio,
-        )
+    """Ejecuta PaddleOCR con parámetros optimizados para números de placa."""
+    # PaddleOCR v3.0 requiere imágenes con 3 canales (HxWxC). Si es escala de grises, convertimos a BGR.
+    if len(processed.shape) == 2:
+        processed = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+    raw = ocr_reader.ocr(processed)
+    
+    # Si es el nuevo PaddleOCR (v3.0+) devuelve una lista de diccionarios
+    if raw and isinstance(raw[0], dict):
+        res_dict = raw[0]
+        polys = res_dict.get("rec_polys", []) or res_dict.get("dt_polys", [])
+        texts = res_dict.get("rec_texts", [])
+        scores = res_dict.get("rec_scores", [])
+        results = []
+        for poly, text, score in zip(polys, texts, scores):
+            results.append([poly, (text, score)])
+    else:
+        results = raw[0] if raw and raw[0] else []
+
+    # Filtrar por allowlist (A-Z, 0-9, guion) y por umbral de confianza mínimo.
+    # PaddleOCR no tiene parámetro allowlist directo; se aplica aquí antes de
+    # que normalize_plate_text() limpie los caracteres finales.
+    filtered: list = []
+    for item in results:
+        try:
+            box_pts, text_conf = item
+            text, conf = text_conf
+        except (TypeError, ValueError):
+            continue
+        if float(conf) < low_text:
+            continue
+        # Conservar texto que contenga al menos 1 carácter de la allowlist
+        cleaned = "".join(c for c in str(text).upper() if c in OCR_ALLOWLIST)
+        if not cleaned:
+            continue
+        filtered.append(item)
+
+    return filtered
 
 
 def _generate_preprocessing_variants(
@@ -404,7 +428,7 @@ def _generate_preprocessing_variants(
     """
     Genera múltiples variantes de preprocesamiento de la imagen.
     Retorna lista de (nombre, imagen_procesada, escala).
-    Intentar varias variantes aumenta la probabilidad de que EasyOCR lea bien la placa.
+    Intentar varias variantes aumenta la probabilidad de que PaddleOCR lea bien la placa.
     """
     variants: list[tuple[str, np.ndarray, float]] = []
 
@@ -498,7 +522,7 @@ def analyze_plate(image_bytes: bytes, ocr_reader=None, realtime: bool = False) -
             results = []
 
         if results:
-            det = _detections_from_easyocr(results)
+            det = _detections_from_paddle(results)
             det = _map_detections_to_image(det, rt_scale, offset, image.shape)
             raw_bboxes_rt.extend(det.xyxy.tolist())
             candidates_rt.extend(_build_candidates(det, image.shape))
@@ -520,7 +544,7 @@ def analyze_plate(image_bytes: bytes, ocr_reader=None, realtime: bool = False) -
                 results_fb = []
 
             if results_fb:
-                det_fb = _detections_from_easyocr(results_fb)
+                det_fb = _detections_from_paddle(results_fb)
                 det_fb = _map_detections_to_image(det_fb, rt_scale, offset, image.shape)
                 raw_bboxes_rt.extend(det_fb.xyxy.tolist())
                 candidates_rt.extend(_build_candidates(det_fb, image.shape))
@@ -584,13 +608,13 @@ def analyze_plate(image_bytes: bytes, ocr_reader=None, realtime: bool = False) -
                 text_thr,
                 low_thr,
                 len(results or []),
-                [(r[1], round(r[2], 2)) for r in (results or [])],
+                [(r[1][0], round(r[1][1], 2)) for r in (results or [])],
             )
 
             if not results:
                 continue
 
-            det = _detections_from_easyocr(results)
+            det = _detections_from_paddle(results)
             # Combinamos la escala estática con el offset original
             det = _map_detections_to_image(det, static_scale, offset, image.shape)
             all_raw_bboxes.extend(det.xyxy.tolist())
@@ -611,7 +635,7 @@ def analyze_plate(image_bytes: bytes, ocr_reader=None, realtime: bool = False) -
     if not all_candidates:
         return {
             "status": "LOW_CONFIDENCE",
-            "message": "EasyOCR no encontro texto legible en la imagen.",
+            "message": "El motor OCR no encontro texto legible en la imagen.",
             "detection_backend": PIPELINE_MODE,
             "requires_manual_review": True,
             "raw_bboxes": all_raw_bboxes,
@@ -676,3 +700,104 @@ def analyze_plate(image_bytes: bytes, ocr_reader=None, realtime: bool = False) -
         "plate_bbox": [float(c) for c in selected.xyxy],
         "raw_bboxes": all_raw_bboxes,
     }
+
+
+def classify_vehicle_attributes(
+    image: np.ndarray,
+    classifier: Any,
+    candidate_brands: list[str],
+    candidate_types: list[str],
+) -> dict[str, str | None]:
+    """Clasifica marca, tipo y color de un vehículo en base a catálogos dinámicos usando CLIP.
+
+    Para optimizar la precisión de CLIP, la clasificación interna se realiza usando
+    etiquetas y prompts en inglés, traduciendo de ida y vuelta con los catálogos en español.
+    """
+    if classifier is None:
+        return {"brand": None, "type": None, "color": None}
+
+    # Convertir imagen numpy BGR (OpenCV) a RGB para PIL / CLIP
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    # 1. Clasificación de Color (estático)
+    colors_mapping = {
+        "white": "Blanco",
+        "black": "Negro",
+        "dark grey": "Gris",
+        "silver": "Plateado",
+        "red": "Rojo",
+        "blue": "Azul",
+        "green": "Verde",
+        "yellow": "Amarillo",
+    }
+    try:
+        color_res = classifier(
+            image_rgb,
+            candidate_labels=list(colors_mapping.keys()),
+            hypothesis_template="a photo of a {} vehicle",
+        )
+        best_color_en = color_res[0]["label"]
+        color_val = colors_mapping.get(best_color_en)
+    except Exception as exc:
+        logger.warning("Fallo al clasificar color con CLIP: %s", exc)
+        color_val = None
+
+    # 2. Clasificación de Marca (dinámica del catálogo)
+    # CLIP es más preciso si agregamos el contexto "car/vehicle" a marcas comunes.
+    brand_val = None
+    if candidate_brands:
+        try:
+            # Diccionario de traducción básica de marcas comunes si es necesario
+            # Si no hay mapeo, se usa directamente el nombre del catálogo.
+            brand_labels = [b.lower() for b in candidate_brands]
+            brand_res = classifier(
+                image_rgb,
+                candidate_labels=brand_labels,
+                hypothesis_template="a photo of a {} car",
+            )
+            best_brand = brand_res[0]["label"]
+            # Encontrar el elemento original en la lista respetando mayúsculas/minúsculas
+            for orig in candidate_brands:
+                if orig.lower() == best_brand:
+                    brand_val = orig
+                    break
+        except Exception as exc:
+            logger.warning("Fallo al clasificar marca con CLIP: %s", exc)
+
+    # 3. Clasificación de Tipo (dinámico del catálogo)
+    type_val = None
+    if candidate_types:
+        # Traducción básica de tipos al inglés para alimentar a CLIP
+        type_translation = {
+            "automovil": "sedan car",
+            "automóvil": "sedan car",
+            "motocicleta": "motorcycle",
+            "camioneta": "pickup truck",
+            "vagoneta": "suv",
+            "vagoneta/suv": "suv",
+            "camión": "truck",
+            "micro": "bus",
+            "minibus": "minivan",
+        }
+        try:
+            # Crear lista de etiquetas en inglés y mapeo inverso
+            english_labels = []
+            rev_mapping = {}
+            for t in candidate_types:
+                clean_t = t.lower().strip()
+                eng = type_translation.get(clean_t, clean_t)
+                english_labels.append(eng)
+                rev_mapping[eng] = t
+
+            type_res = classifier(
+                image_rgb,
+                candidate_labels=english_labels,
+                hypothesis_template="a photo of a {} vehicle",
+            )
+            best_type_eng = type_res[0]["label"]
+            type_val = rev_mapping.get(best_type_eng)
+        except Exception as exc:
+            logger.warning("Fallo al clasificar tipo con CLIP: %s", exc)
+
+    return {"brand": brand_val, "type": type_val, "color": color_val}
+

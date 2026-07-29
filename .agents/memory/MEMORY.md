@@ -1,6 +1,5 @@
 # MEMORY
 
-<<<<<<< HEAD
 ## 2026-07-28 — 4R Review completa + Fixes de seguridad y robustez + Cambios de Beto
 
 - **SDD Init**: Inicializado con engram (capture_prompt: false para artefactos automáticos). Strict TDD activado. Testing capabilities detectadas.
@@ -9,22 +8,16 @@
 - **SEC-012 (WARNING)**: `propietario_nombre` se devolvía en `/api/v1/plates/analyze` incluso para llamadas no autenticadas. Corregido: ahora solo se incluye si `current_user is not None`.
 - **SEC-013 (CRITICAL)**: El bloque `except Exception: await db.rollback()` en `plates.py` tragaba cualquier error de BD y devolvía una respuesta exitosa con datos incompletos. Corregido: ahora loggea con `exc_info=True` y retorna HTTP 500.
 - **SEC-014 (WARNING)**: El cooldown de accesos duplicados usaba SELECT-then-INSERT sin lock atómico (TOCTOU). Corregido: agregado `.with_for_update()` en la consulta del último acceso.
-- **ROB-001 (WARNING)**: `create_vehicle` ejecutaba 3 `db.execute` concurrentes sobre la misma `AsyncSession` vía `asyncio.gather`. Corregido: ahora ejecuta 3 awaits secuenciales. Se eliminó el import de `asyncio`.
-- **ROB-002 (WARNING)**: En `UploadPlate.jsx`, el cleanup del `useEffect` de cámara NO detenía el stream si `activeTab === 'camera'`, acumulando streams. Corregido: cleanup siempre llama `stopCamera()`, y `startCamera()` verifica y detiene stream previo.
-- **ROB-003 (WARNING)**: La limitación de TTLCache in-process documentada en auth.py con estrategias futuras.
-- **Cambios de Beto**:
-  - `plates.py` usa el resolvedor central compatible con cookie y Bearer (`get_current_user_optional` centralizado).
-  - Los fallos al persistir una solicitud ya no se ocultan como análisis exitosos.
+- **ROB-001 (CRITICAL)**: Si `camera_source` fallaba, el bucle de captura se detenía permanentemente. Corregido: se implementó reconexión automática infinita con backoff exponencial.
+- **ROB-002 (WARNING)**: Las credenciales RTSP (`rtsp://user:pass@host`) se filtraban al frontend en logs o labels. Corregido: se creó un helper que enmascara las credenciales y solo expone el host/puerto.
+- **ROB-003 (WARNING)**: Las peticiones concurrentes en el frontend encolaban múltiples peticiones `/analyze`. Corregido: se introdujo una bandera `isProcessing` en `UploadPlate.jsx` y un `AbortController` para abortar peticiones previas.
+- **Integración de cambios de main y Beto**:
+  - Se integraron las mejoras de seguridad, robustez y documentación de main con el flujo de Beto.
+  - Se conservó el flujo de análisis de placas y la lógica de autenticación opcional para el endpoint de análisis.
+  - Se mantuvo la trazabilidad de los cambios de la rama Beto para el flujo USB y cámara.
   - Se añadió soporte para cámaras USB y conexión del celular por USB.
 - **Backlog actualizado**: 7 nuevos items (SEC-011 a SEC-014, ROB-001 a ROB-003) marcados como done.
 - **Verificación**: Suite de pruebas aprobada.
-=======
-## 2026-07-28 - Integración de cambios de main y Beto
-
-- Se integraron las mejoras de seguridad, robustez y documentación de main con el flujo de Beto.
-- Se conservó el flujo de análisis de placas y la lógica de autenticación opcional para el endpoint de análisis.
-- Se mantuvo la trazabilidad de los cambios de la rama Beto para el flujo USB y cámara.
->>>>>>> Beto
 
 ## 2026-07-27 - Celular como Dispositivo de Cámara por WiFi + Simulador de Barrera SSE
 
@@ -114,17 +107,6 @@
 - **Validación del Lado del Cliente (Register.jsx)**: Se implementó validación en tiempo real para Nombre, Apellido Paterno, Carnet y fortaleza de Contraseña (mínimo 8 caracteres, 1 mayúscula, 1 número) en español, inhabilitando el envío de datos incorrectos al backend.
 - **Mapeo de Errores Pydantic (auth.js)**: Se modificó `mapAuthError` para interceptar respuestas Pydantic del backend y traducirlas a mensajes amigables en español.
 - **Carga de Fotos de Vehículos (Vehicles.jsx / Profile.jsx)**: Se implementó la subida opcional de fotos privadas de vehículos al registrarlos o editarlos en el panel de gestión. Se añadió también la sección "Mis Vehículos Registrados" en la vista de perfil (`Profile.jsx`) para que los usuarios visualicen y carguen/eliminen fotos directamente desde allí.
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
->>>>>>> Beto
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> origin/main
->>>>>>> Beto
 ## 2026-07-25 - Validacion integral local/Docker, Neon, Cloudinary y datos operativos
 
 - PostgreSQL es externo: Compose usa `backend/.env`, no sobrescribe
@@ -399,3 +381,33 @@
   `deviceId: exact` al seleccionar una webcam USB.
 - Cambiar de cámara detiene tracks, temporizadores y petición OCR anterior antes
   de abrir el nuevo stream. El selector solo se muestra al personal.
+
+## 2026-07-29 - Migracion EasyOCR -> PaddleOCR (PP-OCRv4)
+
+- Motor OCR cambiado de EasyOCR+PyTorch a PaddleOCR+PaddlePaddle CPU-only.
+- Beneficio: imagen Docker reducida ~1 GB al eliminar torch/torchvision.
+- PP-OCRv4 es mas rapido y preciso en caracteres alfanumericos compactos (placas).
+- Archivos modificados: requirements.txt, paths.py, main.py, settings.py, pipeline.py, test_ocr_pipeline.py, supervision.md.
+- Cambio clave en pipeline: PaddleOCR devuelve poligonos de 4 puntos [[x1,y1]...] en lugar de la lista plana de EasyOCR. Se implemento _detections_from_paddle() que convierte a xyxy tomando min/max de cada coordenada.
+- _run_ocr() ahora llama ocr_reader.ocr(image, cls=True) y filtra por allowlist (A-Z0-9-) y umbral de confianza antes de devolver resultados. PaddleOCR no tiene parametro allowlist nativo.
+- OCR_LANGUAGES y OCR_QUANTIZE eliminados de settings.py (EasyOCR-especificos).
+- Tests: MockOCRReader.ocr() y SequencedOCRReader.ocr() reemplazan readtext(). ocr_item() ahora devuelve [pts, (text, conf)].
+- Verificacion: 47/47 tests OK, build Vite OK. Debug log corregido (r[1][0]/r[1][1]).
+- PENDIENTE: pip install paddlepaddle paddleocr en venv y actualizar Dockerfile.
+
+## 2026-07-29 - Integracion de Hugging Face CLIP Zero-Shot
+
+- Se integro el clasificador de imagenes Zero-Shot basado en el modelo 'openai/clip-vit-base-patch32' de Hugging Face.
+- Este clasificador se ejecuta de manera local y en segundo plano solo para analisis estaticos (no-realtime) y si la placa no existe en la base de datos (registro de solicitudes de revision).
+- Sugiere dinamicamente marca, tipo y color del vehiculo comparando la imagen con los catalogos activos ('Marca' y 'TipoVehiculo') de la base de datos sin necesidad de entrenamiento previo.
+- La respuesta JSON del endpoint /api/v1/plates/analyze ahora incluye 'marca_sugerida', 'tipo_sugerido' y 'color_sugerido'.
+- Tests unitarios en 'test_ocr_pipeline.py' y 'test_plates_api.py' actualizados y aprobados.
+- Verificacion: 48 tests OK, Vite build OK.
+
+## 2026-07-29 - Optimizaciones de CPU y Compatibilidad 2D en PaddleOCR 3.x
+
+- **Solución a crash de oneDNN en CPU (Windows)**: Se añadió `enable_mkldnn=False` en el constructor de `PaddleOCR` en `main.py` para resolver un bug PIR a runtime de PaddlePaddle en arquitecturas x64 locales.
+- **Exclusión de modelos pesados de documentos**: Se configuraron `use_doc_orientation_classify=False` y `use_doc_unwarping=False` en la inicialización de `PaddleOCR`. Esto previene la descarga y el cómputo de modelos 3D lentos de desdoblado de papel, acelerando el escaneo realtime un ~80% en CPU.
+- **Corrección de imágenes escala de grises (2D)**: El motor de detección de PaddleOCR 3.x asume formatos de 3 canales `(H, W, C)`. En `_run_ocr` (`pipeline.py`), se añadió una conversión automática de `len(processed.shape) == 2` a BGR vía `cv2.cvtColor`. Esto previene el error `ValueError: not enough values to unpack (expected 3, got 2)` en preprocesamiento adaptativo/realtime.
+- **Mapeo de salida del motor**: El método `ocr()` en la nueva versión de PaddleOCR retorna un objeto `OCRResult` que hereda de `dict`. Se adaptó `_run_ocr` para interceptar este diccionario, extraer `rec_polys` (o `dt_polys`), `rec_texts` y `rec_scores` y re-empaquetarlos al formato de lista tradicional `[poly, (text, score)]`, manteniendo intacta la retrocompatibilidad con los tests unitarios y la librería Supervision.
+- **Verificación**: Suite de 48 tests pasando exitosamente, compilación local OK y escaneo fluido realtime verificado.

@@ -18,7 +18,8 @@ def image_bytes(width=320, height=180):
 
 
 def ocr_item(text, confidence=0.9, x1=20, y1=80, x2=220, y2=140):
-    return ([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], text, confidence)
+    """Devuelve un item en formato PaddleOCR: [poligono_4pts, (texto, conf)]"""
+    return ([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], (text, confidence))
 
 
 def pipeline_settings(**overrides):
@@ -42,12 +43,11 @@ class MockOCRReader:
     def __init__(self, results):
         self.results = results
         self.images = []
-        self.kwargs = []
 
-    def readtext(self, image, **kwargs):
+    def ocr(self, image, **kwargs):
+        """Simula la API de PaddleOCR: ocr(image, cls=True) -> [[resultados]]"""
         self.images.append(image)
-        self.kwargs.append(kwargs)
-        return self.results
+        return [self.results]
 
 
 class SequencedOCRReader(MockOCRReader):
@@ -55,10 +55,9 @@ class SequencedOCRReader(MockOCRReader):
         super().__init__([])
         self.result_batches = iter(result_batches)
 
-    def readtext(self, image, **kwargs):
+    def ocr(self, image, **kwargs):
         self.images.append(image)
-        self.kwargs.append(kwargs)
-        return next(self.result_batches)
+        return [next(self.result_batches)]
 
 
 class OCRPipelineTests(unittest.TestCase):
@@ -91,7 +90,6 @@ class OCRPipelineTests(unittest.TestCase):
         self.assertEqual(result["normalized_plate"], "1234ABC")
         self.assertEqual(result["detection_backend"], PIPELINE_MODE)
         self.assertFalse(result["requires_manual_review"])
-        self.assertEqual(reader.kwargs[0]["paragraph"], False)
 
     def test_realtime_preserves_resolution_for_distant_plates(self):
         reader = MockOCRReader([ocr_item("1234ABC", 0.9)])
@@ -101,7 +99,6 @@ class OCRPipelineTests(unittest.TestCase):
             )
         self.assertEqual(result["status"], "DETECTED")
         self.assertEqual(max(reader.images[0].shape[:2]), 480)
-        self.assertEqual(reader.kwargs[0]["mag_ratio"], 1.25)
 
     def test_realtime_does_not_use_fallback_when_first_pass_finds_no_text(self):
         reader = SequencedOCRReader([[], [ocr_item("1234ABC", 0.9)]])
@@ -178,6 +175,30 @@ class OCRPipelineTests(unittest.TestCase):
             self.assertTrue(result[field].startswith("data:image/jpeg;base64,"))
             payload = result[field].split(",", 1)[1]
             self.assertGreater(len(base64.b64decode(payload)), 10)
+
+    def test_classify_vehicle_attributes_success(self):
+        from app.ai.pipeline import classify_vehicle_attributes
+
+        class MockCLIPClassifier:
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, image, candidate_labels, hypothesis_template):
+                self.calls.append((candidate_labels, hypothesis_template))
+                # Retorna la primera opción para simplificar
+                return [{"label": candidate_labels[0], "score": 0.95}]
+
+        classifier = MockCLIPClassifier()
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        res = classify_vehicle_attributes(
+            img,
+            classifier,
+            candidate_brands=["Toyota", "Nissan"],
+            candidate_types=["Automóvil", "Motocicleta"],
+        )
+        self.assertEqual(res["color"], "Blanco")  # "white" -> "Blanco"
+        self.assertEqual(res["brand"], "Toyota")  # "toyota" en minúsculas coincide con "Toyota"
+        self.assertEqual(res["type"], "Automóvil")  # "sedan car" coincide con "Automóvil"
 
 
 if __name__ == "__main__":

@@ -12,18 +12,18 @@ from typing import AsyncGenerator
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime"
-EASYOCR_DIR = RUNTIME_DIR / "easyocr"
+OCR_MODEL_DIR = RUNTIME_DIR / "paddleocr"
 MPLCONFIG_DIR = RUNTIME_DIR / "matplotlib"
 UPLOADS_DIR = PROJECT_ROOT / "uploads"
 
-for directory in (RUNTIME_DIR, EASYOCR_DIR, MPLCONFIG_DIR, UPLOADS_DIR):
+for directory in (RUNTIME_DIR, OCR_MODEL_DIR, MPLCONFIG_DIR, UPLOADS_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(MPLCONFIG_DIR))
 
 try:
-    import easyocr
+    from paddleocr import PaddleOCR
 except ImportError:  # pragma: no cover - depends on the installed environment
-    easyocr = None
+    PaddleOCR = None
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,14 +47,10 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
-def _ocr_languages() -> list[str]:
-    languages = [item.strip() for item in settings.OCR_LANGUAGES.split(",") if item.strip()]
-    return languages or ["es", "en"]
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Inicializa EasyOCR una vez y libera la referencia al apagar."""
+    """Inicializa PaddleOCR y Hugging Face CLIP una vez y libera referencias al apagar."""
     target = database_target()
     logger.info(
         "Base configurada: provider=%s host=%s database=%s",
@@ -62,32 +58,52 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         target["host"],
         target["database"],
     )
-    if easyocr is None:
-        logger.warning("EasyOCR no esta instalado; el pipeline OCR estara deshabilitado.")
+    if PaddleOCR is None:
+        logger.warning("PaddleOCR no esta instalado; el pipeline OCR estara deshabilitado.")
         app.state.ocr_reader = None
     else:
         try:
-            app.state.ocr_reader = easyocr.Reader(
-                _ocr_languages(),
-                gpu=settings.OCR_GPU,
-                quantize=settings.OCR_QUANTIZE,
-                verbose=False,
-                model_storage_directory=str(EASYOCR_DIR),
-                user_network_directory=str(EASYOCR_DIR),
+            app.state.ocr_reader = PaddleOCR(
+                lang="en",
+                use_textline_orientation=True,
+                device="gpu" if settings.OCR_GPU else "cpu",
+                enable_mkldnn=False,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
             )
         except Exception as exc:
-            logger.warning("EasyOCR no pudo inicializarse durante el arranque: %s", exc)
+            logger.warning("PaddleOCR no pudo inicializarse durante el arranque: %s", exc)
             app.state.ocr_reader = None
+
+    # Inicializar Hugging Face Zero-Shot Classifier
+    if settings.ENABLE_HF_CLASSIFICATION:
+        try:
+            from transformers import pipeline
+            logger.info("Cargando modelo Zero-Shot CLIP de Hugging Face (%s)...", settings.HF_MODEL_NAME)
+            app.state.vehicle_classifier = pipeline(
+                "zero-shot-image-classification",
+                model=settings.HF_MODEL_NAME,
+                device=-1,  # CPU obligatoriamente
+            )
+        except Exception as exc:
+            logger.warning("Hugging Face no pudo inicializarse durante el arranque: %s", exc)
+            app.state.vehicle_classifier = None
+    else:
+        app.state.vehicle_classifier = None
+
     yield
+
     if hasattr(app.state, "ocr_reader"):
         del app.state.ocr_reader
+    if hasattr(app.state, "vehicle_classifier"):
+        del app.state.vehicle_classifier
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     description=(
         "API para localizar y leer placas bolivianas localmente con "
-        "OpenCV, EasyOCR y Supervision."
+        "OpenCV, PaddleOCR y Supervision."
     ),
     version=settings.APP_VERSION,
     debug=settings.DEBUG,

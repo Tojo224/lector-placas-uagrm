@@ -9,14 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from app.schemas.plate import PlateAnalysisResponse, EscaneadoResponse
-from app.ai.pipeline import analyze_plate, get_pipeline_status
+from app.ai.pipeline import analyze_plate, get_pipeline_status, classify_vehicle_attributes
 from app.core.limiter import limiter
 from app.db.session import get_db
 from app.db.models import (
     Usuario, Escaneado, RoleEnum, Vehiculo, EstadoEscaneoEnum,
     Acceso, ArchivoMultimedia, EstadoCampus, Dispositivo,
     TipoAccesoEnum, UbicacionVehiculoEnum, MediaProviderEnum,
-    MediaTypeEnum, MediaStatusEnum, SolicitudRegistroEstadoEnum, SolicitudRegistroVehiculo
+    MediaTypeEnum, MediaStatusEnum, SolicitudRegistroEstadoEnum, SolicitudRegistroVehiculo,
+    Marca, TipoVehiculo
 )
 from app.services.image_processing import ImageProcessingService, ImageProcessingError
 from app.services.cloudinary_storage import CloudinaryStorage
@@ -260,6 +261,10 @@ async def analyze_plate_endpoint(
                         tipo_acceso.value
                     )
  
+        brand_sug = None
+        type_sug = None
+        color_sug = None
+
         try:
             await db.flush()
             # El polling nunca persiste evidencias ni crea solicitudes.
@@ -270,15 +275,53 @@ async def analyze_plate_endpoint(
                     SolicitudRegistroVehiculo.placa_sugerida == normalized,
                     SolicitudRegistroVehiculo.estado == SolicitudRegistroEstadoEnum.PENDING,
                 ))
+                
+                # Clasificar marca, tipo y color de forma asíncrona local si Hugging Face está disponible
+                classifier = getattr(request.app.state, "vehicle_classifier", None)
+                if classifier is not None:
+                    # Obtener marcas y tipos activos del catálogo
+                    brands_res = await db.execute(select(Marca.nombre).where(Marca.esta_activo == True))
+                    types_res = await db.execute(select(TipoVehiculo.nombre).where(TipoVehiculo.esta_activo == True))
+                    brands = [row[0] for row in brands_res.all()]
+                    types = [row[0] for row in types_res.all()]
+                    
+                    # Decodificar imagen para el clasificador
+                    img_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+                    if img_np is not None:
+                        # Ejecutar en threadpool para no bloquear el loop de asyncio
+                        classification = await run_in_threadpool(
+                            classify_vehicle_attributes,
+                            img_np,
+                            classifier,
+                            brands,
+                            types
+                        )
+                        brand_sug = classification.get("brand")
+                        type_sug = classification.get("type")
+                        color_sug = classification.get("color")
+
                 if not pending:
                     processed = await run_in_threadpool(ImageProcessingService().process, image_bytes, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     uploaded = await run_in_threadpool(CloudinaryStorage().upload, processed.content, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     media = ArchivoMultimedia(proveedor=MediaProviderEnum.CLOUDINARY, tipo=MediaTypeEnum.VEHICLE_REGISTRATION, estado=MediaStatusEnum.READY, asset_id=uploaded.asset_id, public_id=uploaded.public_id, resource_type=uploaded.resource_type, delivery_type=uploaded.delivery_type, formato=uploaded.format, ancho=uploaded.width, alto=uploaded.height, peso_bytes=uploaded.bytes, intentos=1)
                     db.add(media); await db.flush()
-                    solicitud = SolicitudRegistroVehiculo(escaneado_id=scan.id, imagen_id=media.id, placa_sugerida=normalized, confianza_placa=scan.confianza or 0.0, estado=SolicitudRegistroEstadoEnum.PENDING, creado_por_usuario_id=current_user.id)
+                    solicitud = SolicitudRegistroVehiculo(
+                        escaneado_id=scan.id,
+                        imagen_id=media.id,
+                        placa_sugerida=normalized,
+                        confianza_placa=scan.confianza or 0.0,
+                        estado=SolicitudRegistroEstadoEnum.PENDING,
+                        creado_por_usuario_id=current_user.id,
+                        marca_sugerida=brand_sug,
+                        tipo_sugerido=type_sug,
+                        color_sugerido=color_sug
+                    )
                     db.add(solicitud); await db.flush(); solicitud_id = solicitud.id
                 else:
                     solicitud_id = pending.id
+                    brand_sug = pending.marca_sugerida
+                    type_sug = pending.tipo_sugerido
+                    color_sug = pending.color_sugerido
             await db.commit()
         except (ImageProcessingError, StorageError):
             await db.rollback()
@@ -314,7 +357,10 @@ async def analyze_plate_endpoint(
             f"{vehicle.propietario.nombre} {vehicle.propietario.apellido_paterno}".strip()
             if (vehicle and vehicle.propietario and current_user is not None) else None
         ),
-        mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message"))
+        mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message")),
+        marca_sugerida=brand_sug,
+        tipo_sugerido=type_sug,
+        color_sugerido=color_sug
     )
 
 
@@ -344,7 +390,7 @@ async def health_check(request: Request):
         "message": (
             "API de ALPR lista para inferencia."
             if ready
-            else "API disponible, pero EasyOCR no esta inicializado."
+            else "API disponible, pero el motor OCR no esta inicializado."
         ),
         "ocr_available": ocr_available,
         **pipeline,
