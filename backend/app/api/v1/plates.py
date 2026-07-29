@@ -21,18 +21,11 @@ from app.db.models import (
 from app.services.image_processing import ImageProcessingService, ImageProcessingError
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.storage import StorageError
-from app.api.v1.auth import get_current_user
+from app.api.v1.auth import get_current_user, get_current_user_optional
 from app.services.media_tasks import process_media_record, spool_directory
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-async def get_current_user_optional(request: Request, db: AsyncSession = Depends(get_db)) -> Usuario | None:
-    try:
-        return await get_current_user(request, db=db)
-    except HTTPException:
-        return None  # Solo ignoramos errores de autenticación, no de conexión/BD
-
 
 router = APIRouter()
 

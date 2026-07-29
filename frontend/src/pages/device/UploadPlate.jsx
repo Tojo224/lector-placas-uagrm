@@ -39,11 +39,14 @@ const vehicleInitialState = {
 function UploadPlate() {
   const { user } = useAuth();
   const isAdmin = user?.rol === "ADMINISTRATIVE" || user?.rol === "ADMINISTRADOR";
+  const isStaff = user?.rol === "ADMINISTRADOR" || user?.rol === "OPERADOR";
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const modelRef = useRef(null);
   const requestRef = useRef(null);
+  const requestControllerRef = useRef(null);
+  const detectionTimerRef = useRef(null);
   // Mapa de votos: texto_normalizado -> { count, bbox, score, text, lastFrameTs }
   const voteMapRef = useRef(new Map());
   const VOTES_NEEDED = 2; // OPT-D: 2 frames consecutivos — balance entre velocidad y anti-falsos-positivos
@@ -64,6 +67,8 @@ function UploadPlate() {
   const [ownerForm, setOwnerForm] = useState(ownerInitialState);
   const [vehiclePhoto, setVehiclePhoto] = useState(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
   const [accessZone, setAccessZone] = useState("Portería Principal");
   const [accessNotes, setAccessNotes] = useState("");
   const [accessSuccess, setAccessSuccess] = useState("");
@@ -80,6 +85,13 @@ function UploadPlate() {
   useEffect(() => {
     activeModalRef.current = activeModal;
   }, [activeModal]);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) return undefined;
+    const handleDeviceChange = () => refreshCameraList().catch(() => {});
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+  }, []);
 
   useEffect(() => {
     // La cámara siempre encendida mientras estemos en la pestaña de cámara
@@ -333,15 +345,13 @@ function UploadPlate() {
 
   const detectFrame = async () => {
     if (!videoRef.current || !canvasRef.current || !streamRef.current) return;
-    
     // Si hay un modal activo en pantalla, pausar el análisis OCR para no saturar la CPU,
     // pero mantener la cámara encendida.
     if (activeModalRef.current !== null) {
       requestRef.current = null;
-      if (streamRef.current) setTimeout(detectFrame, 1000);
+      if (streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
       return;
     }
-
     if (requestRef.current === "processing") return;
 
     requestRef.current = "processing";
@@ -354,7 +364,7 @@ function UploadPlate() {
 
     if (videoW === 0) {
       requestRef.current = null;
-      if (streamRef.current) setTimeout(detectFrame, 1000);
+      if (streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
       return;
     }
 
@@ -374,9 +384,12 @@ function UploadPlate() {
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
     const controller = new AbortController();
+    requestControllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    let nextInterval = 1000; // Throttle base: 1s (estable, sin detección)
+    // El siguiente frame se toma al terminar la petición anterior. Una pausa
+    // corta evita perder al vehículo mientras cruza el encuadre.
+    let nextInterval = 250;
 
     try {
       // OPT-F: Convertir a escala de grises en el canvas antes de enviar.
@@ -432,7 +445,12 @@ function UploadPlate() {
 
           // Verificar si algún texto alcanzó el umbral de votos
           const winner = [...voteMap.entries()].find(
-            ([, v]) => v.count >= VOTES_NEEDED && v.isValidFormat
+            ([, v]) => v.isValidFormat && (
+              v.count >= VOTES_NEEDED ||
+              // Una lectura muy fuerte se captura inmediatamente: en movimiento
+              // puede no existir un segundo fotograma nítido.
+              (v.count === 1 && v.score >= 0.88)
+            )
           );
 
           if (winner) {
@@ -494,7 +512,7 @@ function UploadPlate() {
           }
           setScanError("");
           setTrackingBoxes([]);
-          nextInterval = 1000;
+          nextInterval = 250;
         }
       }
     } catch (e) {
@@ -505,14 +523,24 @@ function UploadPlate() {
       }
     } finally {
       clearTimeout(timeoutId);
+      if (requestControllerRef.current === controller) {
+        requestControllerRef.current = null;
+      }
     }
     requestRef.current = null;
     if (streamRef.current) {
-      setTimeout(detectFrame, nextInterval);
+      detectionTimerRef.current = setTimeout(detectFrame, nextInterval);
     }
   };
 
-  const startCamera = async (isLive = false) => {
+  const refreshCameraList = async () => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter((device) => device.kind === "videoinput");
+    setAvailableCameras(cameras);
+    return cameras;
+  };
+
+  const startCamera = async (isLive = false, cameraId = selectedCameraId) => {
     // Si ya hay un stream activo, detenerlo antes de pedir uno nuevo
     if (streamRef.current) {
       stopCamera();
@@ -520,15 +548,37 @@ function UploadPlate() {
     try {
       setCameraError("");
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          ...(cameraId
+            ? { deviceId: { exact: cameraId } }
+            : { facingMode: { ideal: "environment" } }),
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, min: 24 }
+        },
         audio: false
       });
+      const [videoTrack] = stream.getVideoTracks();
+      const capabilities = videoTrack?.getCapabilities?.() || {};
+      const advanced = {};
+      if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes("continuous")) {
+        advanced.focusMode = "continuous";
+      }
+      if (Array.isArray(capabilities.exposureMode) && capabilities.exposureMode.includes("continuous")) {
+        advanced.exposureMode = "continuous";
+      }
+      if (Object.keys(advanced).length > 0) {
+        videoTrack.applyConstraints({ advanced: [advanced] }).catch(() => {});
+      }
       streamRef.current = stream;
+      const activeCameraId = videoTrack?.getSettings?.().deviceId || cameraId;
+      if (activeCameraId) setSelectedCameraId(activeCameraId);
+      await refreshCameraList();
       setCameraOpen(true);
       
       if (isLive) {
         // Iniciar bucle con throttle (no requestAnimationFrame)
-        setTimeout(detectFrame, 300);
+        detectionTimerRef.current = setTimeout(detectFrame, 300);
       }
       
     } catch (error) {
@@ -538,6 +588,10 @@ function UploadPlate() {
   };
 
   const stopCamera = () => {
+    clearTimeout(detectionTimerRef.current);
+    detectionTimerRef.current = null;
+    requestControllerRef.current?.abort();
+    requestControllerRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -546,6 +600,13 @@ function UploadPlate() {
     setTrackingBoxes([]);
     requestRef.current = null;
     voteMapRef.current.clear(); // Limpiar votos acumulados al cerrar
+  };
+
+  const changeCamera = async (event) => {
+    const cameraId = event.target.value;
+    setSelectedCameraId(cameraId);
+    stopCamera();
+    await startCamera(activeTab === "camera", cameraId);
   };
 
   const captureFromCamera = async () => {
@@ -765,6 +826,38 @@ function UploadPlate() {
 
       {activeTab === "camera" && (
         <div style={{ animation: "fadeIn 0.3s ease" }}>
+          {isStaff && (
+            <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
+              <label htmlFor="camera-device" style={{ display: "block", fontWeight: 700, marginBottom: "0.5rem" }}>
+                Cámara conectada
+              </label>
+              <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                <select
+                  id="camera-device"
+                  value={selectedCameraId}
+                  onChange={changeCamera}
+                  style={{ flex: "1 1 280px", padding: "0.75rem", borderRadius: "8px" }}
+                >
+                  {availableCameras.length === 0 && <option value="">Cámara predeterminada</option>}
+                  {availableCameras.map((camera, index) => (
+                    <option key={camera.deviceId} value={camera.deviceId}>
+                      {camera.label || `Cámara ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="button secondary-button"
+                  onClick={() => refreshCameraList().catch(() => setCameraError("No se pudieron consultar las cámaras."))}
+                >
+                  Actualizar cámaras
+                </button>
+              </div>
+              <p className="muted-text" style={{ margin: "0.5rem 0 0", fontSize: "0.85rem" }}>
+                Conecta la cámara USB y selecciónala aquí. El navegador puede pedir permiso la primera vez.
+              </p>
+            </div>
+          )}
           <div className="card" style={{ padding: 0, overflow: "hidden", borderRadius: "16px" }}>
             <div className="camera-section" style={{ position: "relative" }}>
               {cameraOpen ? (

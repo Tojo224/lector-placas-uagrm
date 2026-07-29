@@ -73,14 +73,14 @@ function AdminRoute({ children }) {
   return children;
 }
 
-function DispositivoRoute({ children }) {
+function PlateScannerRoute({ children }) {
   const { user, authLoading } = useAuth();
 
   if (authLoading) {
     return <Loader label="Validando rol..." />;
   }
 
-  if (user?.rol !== "DISPOSITIVO") {
+  if (!["ADMINISTRADOR", "OPERADOR", "DISPOSITIVO"].includes(user?.rol)) {
     return <Navigate to="/" replace />;
   }
 
@@ -112,7 +112,7 @@ function AppRoutes() {
       <Route path="/registro" element={<Register />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<HomeRoute />} />
-        <Route path="/subir-placa" element={<DispositivoRoute><UploadPlate /></DispositivoRoute>} />
+        <Route path="/subir-placa" element={<PlateScannerRoute><UploadPlate /></PlateScannerRoute>} />
         <Route path="/perfil" element={<Profile />} />
         <Route path="/usuarios" element={<AdminRoute><Users /></AdminRoute>} />
         <Route path="/dispositivos" element={<AdminRoute><Devices /></AdminRoute>} />

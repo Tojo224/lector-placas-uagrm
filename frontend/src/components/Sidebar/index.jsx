@@ -12,6 +12,7 @@ function Sidebar({ isOpen, onClose }) {
   if (user?.rol === "ADMINISTRADOR") {
     links.push(
       { to: "/", label: "Dashboard" },
+      { to: "/subir-placa", label: "Escanear Placas" },
       { to: "/vehiculos", label: "Gestionar Vehiculos" },
       { to: "/usuarios", label: "Gestionar Usuarios" },
       { to: "/dispositivos", label: "Gestionar Dispositivos" },
@@ -20,6 +21,7 @@ function Sidebar({ isOpen, onClose }) {
     );
   } else if (user?.rol === "OPERADOR") {
     links.push(
+      { to: "/subir-placa", label: "Escanear Placas" },
       { to: "/vehiculos", label: "Gestionar Vehiculos" },
       { to: "/accesos", label: "Control de Accesos" }
       ,{ to: "/solicitudes-vehiculos", label: "Solicitudes de Vehiculos" }

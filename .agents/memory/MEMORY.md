@@ -1,6 +1,6 @@
 # MEMORY
 
-## 2026-07-28 — 4R Review completa + Fixes de seguridad y robustez
+## 2026-07-28 — 4R Review completa + Fixes de seguridad y robustez + Cambios de Beto
 
 - **SDD Init**: Inicializado con engram (capture_prompt: false para artefactos automáticos). Strict TDD activado. Testing capabilities detectadas.
 - **4R Review**: Ejecutadas las 4R completas (Risk, Resilience, Readability, Reliability) vía gentle-ai review sobre el último commit (26 archivos, 1372 líneas). Estado: **approved**.
@@ -11,8 +11,12 @@
 - **ROB-001 (WARNING)**: `create_vehicle` ejecutaba 3 `db.execute` concurrentes sobre la misma `AsyncSession` vía `asyncio.gather`. Corregido: ahora ejecuta 3 awaits secuenciales. Se eliminó el import de `asyncio`.
 - **ROB-002 (WARNING)**: En `UploadPlate.jsx`, el cleanup del `useEffect` de cámara NO detenía el stream si `activeTab === 'camera'`, acumulando streams. Corregido: cleanup siempre llama `stopCamera()`, y `startCamera()` verifica y detiene stream previo.
 - **ROB-003 (WARNING)**: La limitación de TTLCache in-process documentada en auth.py con estrategias futuras.
+- **Cambios de Beto**:
+  - `plates.py` usa el resolvedor central compatible con cookie y Bearer (`get_current_user_optional` centralizado).
+  - Los fallos al persistir una solicitud ya no se ocultan como análisis exitosos.
+  - Se añadió soporte para cámaras USB y conexión del celular por USB.
 - **Backlog actualizado**: 7 nuevos items (SEC-011 a SEC-014, ROB-001 a ROB-003) marcados como done.
-- **Verificación**: Compileall Python y build Vite no ejecutados por falta de .venv.
+- **Verificación**: Suite de pruebas aprobada.
 
 ## 2026-07-27 - Celular como Dispositivo de Cámara por WiFi + Simulador de Barrera SSE
 
@@ -103,6 +107,10 @@
 - **Mapeo de Errores Pydantic (auth.js)**: Se modificó `mapAuthError` para interceptar respuestas Pydantic del backend y traducirlas a mensajes amigables en español.
 - **Carga de Fotos de Vehículos (Vehicles.jsx / Profile.jsx)**: Se implementó la subida opcional de fotos privadas de vehículos al registrarlos o editarlos en el panel de gestión. Se añadió también la sección "Mis Vehículos Registrados" en la vista de perfil (`Profile.jsx`) para que los usuarios visualicen y carguen/eliminen fotos directamente desde allí.
 
+<<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
+>>>>>>> Beto
 ## 2026-07-25 - Validacion integral local/Docker, Neon, Cloudinary y datos operativos
 
 - PostgreSQL es externo: Compose usa `backend/.env`, no sobrescribe
@@ -348,3 +356,32 @@
   - dataset incompleto para entrenamiento YOLO
   - falta validar inferencia real local por ausencia de modelo
   - dependencias de IA no instaladas en este entorno de ejecucion para correr entrenamiento/ocr real
+# Mejora de deteccion a distancia - 2026-07-28
+
+- La causa principal era el doble límite de 480 px en frontend y backend, que
+  eliminaba detalle de caracteres pequeños antes de EasyOCR.
+- El modo realtime conserva ahora 960 px, solicita captura ideal 1920x1080,
+  codifica JPEG al 90% y usa `mag_ratio=1.25`.
+- El threshold adaptativo se ejecuta también cuando la pasada principal devuelve
+  cero textos, cubriendo placas distantes o con iluminación desigual.
+- Validados 13 tests del pipeline OCR y build Vite. El verificador completo queda
+  condicionado por `pytest` ausente en `backend/.venv`, un problema del entorno.
+
+## Captura de placas en movimiento
+
+- La cámara web solicita 1920x1080 a 24-30 fps y aplica enfoque y exposición
+  continuos si el navegador/dispositivo los publica como capacidades.
+- Se eliminó la conversión RGBA a gris en JavaScript; OpenCV sigue realizando la
+  conversión en backend sin bloquear la captura del siguiente fotograma.
+- El intervalo posterior a OCR se redujo a 100 ms con candidato y 250 ms sin él.
+- Una lectura válida con score combinado >= 0.88 se captura en un fotograma; las
+  lecturas menos fuertes mantienen el consenso de dos votos.
+
+## Cámara USB desde cuentas de staff
+
+- La ruta `/subir-placa` admite ADMINISTRADOR, OPERADOR y DISPOSITIVO.
+- El menú lateral de administrador y operador incluye `Escanear Placas`.
+- `UploadPlate` enumera entradas `videoinput`, reacciona a `devicechange` y usa
+  `deviceId: exact` al seleccionar una webcam USB.
+- Cambiar de cámara detiene tracks, temporizadores y petición OCR anterior antes
+  de abrir el nuevo stream. El selector solo se muestra al personal.

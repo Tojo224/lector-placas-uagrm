@@ -20,6 +20,7 @@ class PlatesAPITests(unittest.TestCase):
         self.db.execute = AsyncMock(return_value=query_result)
         self.db.commit = AsyncMock()
         self.db.rollback = AsyncMock()
+        self.db.flush = AsyncMock()
 
         async def override_db():
             yield self.db

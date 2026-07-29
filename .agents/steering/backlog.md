@@ -15,6 +15,7 @@
 - `UNKNOWN-VEHICLE-PHASE1` | `done` | Prioridad `alta` | Solicitudes de registro para placas válidas no registradas con evidencia Cloudinary y bandeja staff | Dependencias: MEDIA-001
 - `UNKNOWN-VEHICLE-DB-001` | `done` | Prioridad `critica` | Alinear grafo Alembic con revisión 3aa735770818 desplegada en Neon y aplicar tabla de solicitudes | Dependencias: UNKNOWN-VEHICLE-PHASE1
 - `UNKNOWN-VEHICLE-UI-001` | `done` | Prioridad `alta` | Rediseñar revisión de solicitudes con modal y catálogos legibles | Dependencias: UNKNOWN-VEHICLE-PHASE1
+- `UNKNOWN-VEHICLE-AUTH-001` | `done` | Prioridad `critica` | Conservar autenticación Bearer móvil al crear solicitudes desconocidas | Dependencias: UNKNOWN-VEHICLE-PHASE1
 
 - `HARNESS-001` | `done` | Prioridad `alta` | Crear harness `.agents` alineado al proyecto real | Dependencias: ninguna
 - `AI-001` | `done` | Prioridad `alta` | Usar Supervision para representar, filtrar, recortar y anotar resultados EasyOCR | Dependencias: ninguna
@@ -46,6 +47,9 @@
 - `HARNESS-003` | `done` | Prioridad `media` | Ejecutar unit tests y smoke del endpoint analyze desde los scripts operativos | Dependencias: `CAM-003`
 - `OCR-ROI-001` | `done` | Prioridad `alta` | Permitir ROI opcional validada para camaras fijas | Dependencias: `AI-003`
 - `OCR-PHYSICAL-001` | `blocked` | Prioridad `alta` | Calibrar OCR, ROI e iluminacion con placas y camaras fisicas | Dependencias: hardware real
+- `OCR-DIST-001` | `done` | Prioridad `alta` | Preservar resolución y fallback sensible para placas lejanas en cámara móvil | Dependencias: `OPT-001`
+- `OCR-MOTION-001` | `done` | Prioridad `alta` | Reducir latencia de captura y habilitar confirmación fuerte de un fotograma para vehículos en movimiento | Dependencias: `OCR-DIST-001`
+- `CAM-USB-STAFF-001` | `done` | Prioridad `alta` | Permitir a operador y administrador seleccionar y usar cámaras USB desde el navegador | Dependencias: `CAM-WIFI-001`
 - `DOCKER-001` | `done` | Prioridad `alta` | Crear Dockerfile para el frontend en Node 20 alpine | Dependencias: ninguna
 - `DOCKER-002` | `done` | Prioridad `alta` | Crear docker-compose.yml orquestando Postgres 17, Backend y Frontend | Dependencias: ninguna
 - `DOCKER-003` | `done` | Prioridad `alta` | Corregir compatibilidad OpenGL en slim Debian reemplazando libgl1-mesa-glx por libgl1 | Dependencias: ninguna

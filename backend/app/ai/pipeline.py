@@ -381,7 +381,9 @@ def _run_ocr(
             message=".*'pin_memory' argument is set as true but no accelerator is found.*",
             category=UserWarning,
         )
-        mag_ratio = 1.0 if realtime else 1.5
+        # Mejora la localización de caracteres pequeños sin asumir el coste
+        # completo del modo estático.
+        mag_ratio = 1.25 if realtime else 1.5
         width_ths = 1.5 if realtime else 2.0
         return ocr_reader.readtext(
             processed,
