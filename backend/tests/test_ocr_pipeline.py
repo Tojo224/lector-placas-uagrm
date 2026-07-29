@@ -100,15 +100,15 @@ class OCRPipelineTests(unittest.TestCase):
                 image_bytes(width=1920, height=1080), reader, realtime=True
             )
         self.assertEqual(result["status"], "DETECTED")
-        self.assertEqual(max(reader.images[0].shape[:2]), 960)
+        self.assertEqual(max(reader.images[0].shape[:2]), 480)
         self.assertEqual(reader.kwargs[0]["mag_ratio"], 1.25)
 
-    def test_realtime_uses_sensitive_fallback_when_first_pass_finds_no_text(self):
+    def test_realtime_does_not_use_fallback_when_first_pass_finds_no_text(self):
         reader = SequencedOCRReader([[], [ocr_item("1234ABC", 0.9)]])
         with pipeline_settings():
             result = analyze_plate(image_bytes(), reader, realtime=True)
-        self.assertEqual(result["status"], "DETECTED")
-        self.assertEqual(len(reader.images), 2)
+        self.assertEqual(result["status"], "LOW_CONFIDENCE")
+        self.assertEqual(len(reader.images), 1)
 
     def test_valid_plate_wins_over_higher_confidence_non_plate_text(self):
         reader = MockOCRReader(
