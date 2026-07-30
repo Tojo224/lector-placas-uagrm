@@ -120,12 +120,21 @@ async def analyze_plate_endpoint(
             detail="El motor OCR no está disponible en este momento."
         )
 
-    result_dict = await run_in_threadpool(
-        analyze_plate,
-        image_bytes,
-        realtime,
-        plate_engine,
-    )
+    try:
+        result_dict = await asyncio.wait_for(
+            run_in_threadpool(
+                analyze_plate,
+                image_bytes,
+                realtime,
+                plate_engine,
+            ),
+            timeout=settings.OCR_INFERENCE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "ocr_timeout", "message": "OCR inference timed out"},
+        )
 
     if result_dict.get("status") == "ERROR":
         return JSONResponse(
@@ -216,10 +225,13 @@ async def analyze_plate_endpoint(
             if dispositivo:
                 disp_uuid = dispositivo.id
 
+        combined = result_dict.get("combined_confidence")
+        ocr_conf = result_dict.get("ocr_confidence")
+        confidence = combined if combined is not None else (ocr_conf if ocr_conf is not None else 0.0)
         scan = Escaneado(
             placa_detectada=result_dict.get("detected_plate"),
             placa_normalizada=normalized,
-            confianza=result_dict.get("combined_confidence") or result_dict.get("ocr_confidence") or 0.0,
+            confianza=confidence,
             estado=estado_enum,
             vehiculo_id=vehicle.id if vehicle else None,
             dispositivo_id=disp_uuid
@@ -227,6 +239,11 @@ async def analyze_plate_endpoint(
         db.add(scan)
         
         if vehicle:
+            # Lock the vehicle row so the first-access check is serialized even
+            # when no Acceso row exists yet.
+            await db.execute(
+                select(Vehiculo).where(Vehiculo.id == vehicle.id).with_for_update()
+            )
             # Check if there is a recent access for this vehicle to prevent duplicates (cooldown)
             # TOCTOU-001: FOR UPDATE sobre Acceso para serializar el cooldown.
             # Solo lockea filas de Acceso (OF Acceso), no Escaneado.

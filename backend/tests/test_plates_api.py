@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -111,6 +112,22 @@ class PlatesAPITests(unittest.TestCase):
         self.assertEqual(response.json(), expected_response)
         self.db.flush.assert_awaited()
         self.db.commit.assert_awaited_once()
+
+    def test_analyze_endpoint_returns_gateway_timeout_for_slow_ocr(self):
+        image = np.zeros((20, 40, 3), dtype=np.uint8)
+        ok, encoded = cv2.imencode(".jpg", image)
+        self.assertTrue(ok)
+        with patch.object(
+            plates,
+            "run_in_threadpool",
+            new=AsyncMock(side_effect=asyncio.TimeoutError),
+        ):
+            response = self.client.post(
+                "/api/v1/plates/analyze",
+                files={"file": ("plate.jpg", encoded.tobytes(), "image/jpeg")},
+            )
+        self.assertEqual(response.status_code, 504)
+        self.assertEqual(response.json(), {"error": "ocr_timeout", "message": "OCR inference timed out"})
 
     def test_static_upload_returns_color_without_creating_request(self):
         pipeline_output = {

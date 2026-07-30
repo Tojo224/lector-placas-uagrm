@@ -56,14 +56,11 @@ def run_db_migrations() -> None:
     """Ejecuta de forma programática las migraciones de Alembic al iniciar."""
     from alembic.config import Config
     from alembic import command
-    try:
-        logger.info("Iniciando ejecución automática de migraciones de Alembic...")
-        alembic_cfg = Config(PROJECT_ROOT / "alembic.ini")
-        alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Migraciones de base de datos completadas exitosamente.")
-    except Exception as e:
-        logger.error(f"Error ejecutando migraciones automáticas: {e}")
+    logger.info("Iniciando ejecución automática de migraciones de Alembic...")
+    alembic_cfg = Config(PROJECT_ROOT / "alembic.ini")
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    command.upgrade(alembic_cfg, "head")
+    logger.info("Migraciones de base de datos completadas exitosamente.")
 
 
 async def bootstrap_production_database() -> None:
@@ -79,8 +76,8 @@ async def bootstrap_production_database() -> None:
             result = await session.execute(select(Usuario))
             if not result.scalars().first():
                 logger.info("No se encontraron usuarios en la base de datos. Creando administrador inicial...")
-                bootstrap_carnet = os.getenv("BOOTSTRAP_ADMIN_CARNET", "1111111")
-                bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "AdminPassword123")
+                bootstrap_carnet = settings.BOOTSTRAP_ADMIN_CARNET
+                bootstrap_password = settings.BOOTSTRAP_ADMIN_PASSWORD
                 bootstrap_nombre = os.getenv("BOOTSTRAP_ADMIN_NOMBRE", "Administrador")
                 bootstrap_apellido = os.getenv("BOOTSTRAP_ADMIN_APELLIDO", "Sistema")
 
@@ -120,7 +117,7 @@ async def bootstrap_production_database() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Inicializa FastALPR/FastPlateOCR una sola vez."""
     # Ejecutar migraciones y bootstrap
-    run_db_migrations()
+    await asyncio.wait_for(asyncio.to_thread(run_db_migrations), timeout=120)
     await bootstrap_production_database()
 
     target = database_target()

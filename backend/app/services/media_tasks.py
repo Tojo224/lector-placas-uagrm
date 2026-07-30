@@ -44,17 +44,22 @@ async def process_media_record(media_id: UUID) -> None:
             processed = await asyncio.to_thread(
                 ImageProcessingService().process, original, media_type
             )
-            uploaded = await asyncio.to_thread(
-                CloudinaryStorage().upload, processed.content, media_type
+            uploaded = await asyncio.wait_for(
+                asyncio.to_thread(
+                    CloudinaryStorage().upload, processed.content, media_type
+                ),
+                timeout=settings.CLOUDINARY_UPLOAD_TIMEOUT_SECONDS,
             )
-        except (OSError, StorageError, ImageProcessingError, ValueError, TypeError) as exc:
+        except (OSError, StorageError, ImageProcessingError, ValueError, TypeError, asyncio.TimeoutError) as exc:
             async with AsyncSessionLocal() as session:
                 media = await session.get(ArchivoMultimedia, media_id)
                 if not media:
                     return
                 media.estado = MediaStatusEnum.FAILED
                 media.ultimo_error = (
-                    str(exc)
+                    "Cloudinary upload timed out"
+                    if isinstance(exc, asyncio.TimeoutError)
+                    else str(exc)
                     if isinstance(exc, (StorageError, ImageProcessingError))
                     else "No se pudo procesar o almacenar la evidencia"
                 )[:500]

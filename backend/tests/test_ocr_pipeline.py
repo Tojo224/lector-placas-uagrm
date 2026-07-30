@@ -4,7 +4,17 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
-from app.ai.pipeline import PIPELINE_MODE, analyze_plate
+from app.ai.pipeline import (
+    PIPELINE_MODE,
+    _SCORE_ASPECT_WEIGHT,
+    _SCORE_CONFIDENCE_WEIGHT,
+    _SCORE_LENGTH_WEIGHT,
+    _SCORE_POSITION_WEIGHT,
+    _SCORE_SIZE_WEIGHT,
+    _SCORE_VALID_FORMAT_WEIGHT,
+    _confidence_value,
+    analyze_plate,
+)
 from app.config.settings import settings
 
 
@@ -35,6 +45,24 @@ def prediction(text="1234ABC", ocr_confidence=0.92, detector_confidence=0.90):
 
 
 class OCRPipelineTests(unittest.TestCase):
+    def test_scoring_weights_are_named_and_sum_to_one(self):
+        self.assertAlmostEqual(
+            sum(
+                (
+                    _SCORE_VALID_FORMAT_WEIGHT,
+                    _SCORE_CONFIDENCE_WEIGHT,
+                    _SCORE_LENGTH_WEIGHT,
+                    _SCORE_ASPECT_WEIGHT,
+                    _SCORE_SIZE_WEIGHT,
+                    _SCORE_POSITION_WEIGHT,
+                )
+            ),
+            1.0,
+        )
+
+    def test_explicit_zero_confidence_is_preserved(self):
+        self.assertEqual(_confidence_value(0.0), 0.0)
+
     def test_empty_image(self):
         result = analyze_plate(b"", plate_engine=MockFastALPR([]))
         self.assertEqual(result["error_code"], "empty_image")

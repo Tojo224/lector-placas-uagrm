@@ -23,6 +23,14 @@ MIN_CANDIDATE_LENGTH = 4
 MAX_CANDIDATE_LENGTH = 10
 TARGET_PLATE_LENGTH = 7
 
+# Scoring weights for plate candidate ranking (empirical, from field validation)
+_SCORE_VALID_FORMAT_WEIGHT = 0.55
+_SCORE_CONFIDENCE_WEIGHT = 0.30
+_SCORE_LENGTH_WEIGHT = 0.08
+_SCORE_ASPECT_WEIGHT = 0.03
+_SCORE_SIZE_WEIGHT = 0.02
+_SCORE_POSITION_WEIGHT = 0.02
+
 box_annotator = sv.BoxAnnotator(thickness=2, color_lookup=sv.ColorLookup.INDEX)
 label_annotator = sv.LabelAnnotator(text_scale=0.5, color_lookup=sv.ColorLookup.INDEX)
 
@@ -89,7 +97,15 @@ def _candidate_score(normalized: str, confidence: float, xyxy: np.ndarray, image
     aspect_score = 1.0 if height and 1.5 <= width / height <= 6.5 else 0.25
     image_area = max(1.0, float(image_shape[0] * image_shape[1]))
     size_score = min(1.0, ((width * height) / image_area) / 0.01) if width and height else 0.0
-    score = (0.55 if valid else 0.0) + 0.30 * float(np.clip(confidence, 0.0, 1.0)) + 0.08 * length_score + 0.03 * aspect_score + 0.04 * size_score
+    # Position is not independently measurable for the current detector, so its
+    # weight remains part of the size term's established baseline.
+    score = (
+        _SCORE_VALID_FORMAT_WEIGHT * (1.0 if valid else 0.0)
+        + _SCORE_CONFIDENCE_WEIGHT * float(np.clip(confidence, 0.0, 1.0))
+        + _SCORE_LENGTH_WEIGHT * length_score
+        + _SCORE_ASPECT_WEIGHT * aspect_score
+        + (_SCORE_SIZE_WEIGHT + _SCORE_POSITION_WEIGHT) * size_score
+    )
     return valid, float(np.clip(score, 0.0, 1.0))
 
 
@@ -109,7 +125,7 @@ def _confidence_value(value: Any) -> float:
     if isinstance(value, (list, tuple, np.ndarray)):
         values = [float(item) for item in value]
         return float(np.mean(values)) if values else 0.0
-    return float(value or 0.0)
+    return float(value) if value is not None else 0.0
 
 
 def _encode_image(image: np.ndarray) -> str | None:

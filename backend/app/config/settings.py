@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     OCR_USE_CONTRAST: bool = True
     OCR_DENOISE: bool = True
     OCR_USE_THRESHOLD: bool = False
+    OCR_INFERENCE_TIMEOUT_SECONDS: float = 30.0
     OCR_ROI_X: int | None = None
     OCR_ROI_Y: int | None = None
     OCR_ROI_WIDTH: int | None = None
@@ -75,6 +76,11 @@ class Settings(BaseSettings):
     MEDIA_ACCESS_RETENTION_DAYS: int = 90
     MEDIA_UPLOAD_MAX_RETRIES: int = 3
     MEDIA_SPOOL_DIR: str = ".runtime/media-spool"
+    CLOUDINARY_UPLOAD_TIMEOUT_SECONDS: float = 30.0
+
+    # Bootstrap credentials are intentionally required; never use insecure defaults.
+    BOOTSTRAP_ADMIN_PASSWORD: str
+    BOOTSTRAP_ADMIN_CARNET: str
 
     @field_validator(
         "DEBUG",
