@@ -10,11 +10,11 @@ export function saveSession(session) {
 }
 
 export function readSession() {
-  const raw = localStorage.getItem(AUTH_KEY);
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    if (!raw) return null;
     return JSON.parse(raw);
-  } catch (e) {
+  } catch {
     return null;
   }
 }

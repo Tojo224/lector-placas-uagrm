@@ -136,11 +136,14 @@ async def _enrich_with_detection(
                 None,
             )
     if association is not None and clip_classifier is not None:
-        color_result = await run_in_threadpool(
-            HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
-            image_bytes,
-            result_dict.get("plate_bbox"),
-            association,
+        color_result = await asyncio.wait_for(
+            run_in_threadpool(
+                HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
+                image_bytes,
+                result_dict.get("plate_bbox"),
+                association,
+            ),
+            timeout=settings.OCR_INFERENCE_TIMEOUT_SECONDS,
         )
     return {
         "type_result": type_result,
@@ -242,6 +245,18 @@ async def _register_access(
     return log
 
 
+def _color_result_field(color_result, field: str, default=None):
+    if color_result is None:
+        return default
+    return getattr(color_result, field, default)
+
+
+def _type_result_field(type_result: VehicleTypeResult, field: str, realtime: bool):
+    if realtime:
+        return None
+    return getattr(type_result, field, None)
+
+
 def _build_plate_response(
     result_dict: dict,
     vehicle: Vehiculo | None,
@@ -271,19 +286,19 @@ def _build_plate_response(
             f"{vehicle.propietario.nombre} {vehicle.propietario.apellido_paterno}".strip()
             if (vehicle and vehicle.propietario) else None
         ),
-        color_sugerido=color_result.color_sugerido if color_result else (
-            "DESCONOCIDO" if not realtime else None
+        color_sugerido=_color_result_field(
+            color_result, "color_sugerido", None if realtime else "DESCONOCIDO"
         ),
-        confianza_color=color_result.confianza_color if color_result else (
-            0.0 if not realtime else None
+        confianza_color=_color_result_field(
+            color_result, "confianza_color", None if realtime else 0.0
         ),
-        metodo_color=color_result.metodo_color if color_result else (
-            "DESCONOCIDO" if not realtime else None
+        metodo_color=_color_result_field(
+            color_result, "metodo_color", None if realtime else "DESCONOCIDO"
         ),
-        tipo_sugerido_id=type_result.tipo_sugerido_id if not realtime else None,
-        tipo_sugerido=suggested_type_name if not realtime else None,
-        confianza_tipo=type_result.confianza_tipo if not realtime else None,
-        metodo_tipo=type_result.metodo_tipo if not realtime else None,
+        tipo_sugerido_id=_type_result_field(type_result, "tipo_sugerido_id", realtime),
+        tipo_sugerido=None if realtime else suggested_type_name,
+        confianza_tipo=_type_result_field(type_result, "confianza_tipo", realtime),
+        metodo_tipo=_type_result_field(type_result, "metodo_tipo", realtime),
         ocr_unavailable=result_dict.get("ocr_unavailable", False),
         fallback_attempted=result_dict.get("fallback_attempted", False),
         mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message")),
@@ -418,7 +433,8 @@ async def analyze_plate_endpoint(
                     processed = await run_in_threadpool(ImageProcessingService().process, image_bytes, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     uploaded = await run_in_threadpool(CloudinaryStorage().upload, processed.content, MediaTypeEnum.VEHICLE_REGISTRATION.value)
                     media = ArchivoMultimedia(proveedor=MediaProviderEnum.CLOUDINARY, tipo=MediaTypeEnum.VEHICLE_REGISTRATION, estado=MediaStatusEnum.READY, asset_id=uploaded.asset_id, public_id=uploaded.public_id, resource_type=uploaded.resource_type, delivery_type=uploaded.delivery_type, formato=uploaded.format, ancho=uploaded.width, alto=uploaded.height, peso_bytes=uploaded.bytes, intentos=1)
-                    db.add(media); await db.flush()
+                    db.add(media)
+                    await db.flush()
                     solicitud = SolicitudRegistroVehiculo(
                         escaneado_id=scan.id,
                         imagen_id=media.id,
@@ -433,7 +449,9 @@ async def analyze_plate_endpoint(
                         estado=SolicitudRegistroEstadoEnum.PENDING,
                         creado_por_usuario_id=current_user.id,
                     )
-                    db.add(solicitud); await db.flush(); solicitud_id = solicitud.id
+                    db.add(solicitud)
+                    await db.flush()
+                    solicitud_id = solicitud.id
                 else:
                     solicitud_id = pending.id
             await db.commit()

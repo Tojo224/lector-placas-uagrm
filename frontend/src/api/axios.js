@@ -35,7 +35,14 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (error?.response?.status >= 500 && originalRequest && !originalRequest._retry5xx) {
+    const method = originalRequest?.method?.toUpperCase() || "GET";
+    const idempotentMethods = new Set(["GET", "HEAD", "OPTIONS", "PUT"]);
+    if (
+      error?.response?.status >= 500 &&
+      originalRequest &&
+      !originalRequest._retry5xx &&
+      idempotentMethods.has(method)
+    ) {
       originalRequest._retry5xx = true;
       await new Promise(resolve => setTimeout(resolve, 1000));
       return apiClient(originalRequest);

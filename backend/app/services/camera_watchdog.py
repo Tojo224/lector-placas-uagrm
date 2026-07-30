@@ -22,6 +22,7 @@ class CameraWatchdog:
         self._max_restarts = 5
         self._restart_window = 300
         self._restart_times: list[float] = []
+        self._restart_lock = threading.Lock()
 
     @property
     def is_alive(self) -> bool:
@@ -82,7 +83,19 @@ class CameraWatchdog:
             self.start()
         elif not self.is_alive:
             logger.warning("Camera process died (was PID=%d), restarting...", self._process.pid)
-            self.restart()
+            with self._restart_lock:
+                now = time.monotonic()
+                self._restart_times = [
+                    timestamp
+                    for timestamp in self._restart_times
+                    if now - timestamp < self._restart_window
+                ]
+                if len(self._restart_times) >= self._max_restarts:
+                    logger.critical("Camera watchdog: max restarts reached in window, stopping")
+                    self._kill_process()
+                else:
+                    self._restart_times.append(now)
+                    self.restart()
         return self.is_alive
 
     def health(self) -> dict:
@@ -119,8 +132,21 @@ class CameraWatchdog:
                     logger.info("Camera monitor: backing off %.1fs before restart", delay)
                     if self._stop_event.wait(delay):
                         break
-                    self._restart_times.append(time.monotonic())
-                    self.restart()
+                    with self._restart_lock:
+                        now = time.monotonic()
+                        self._restart_times = [
+                            timestamp
+                            for timestamp in self._restart_times
+                            if now - timestamp < self._restart_window
+                        ]
+                        if self.is_alive:
+                            continue
+                        if len(self._restart_times) >= self._max_restarts:
+                            logger.critical("Camera watchdog: max restarts reached in window, stopping")
+                            self._kill_process()
+                            break
+                        self._restart_times.append(now)
+                        self.restart()
             except Exception:
                 logger.exception("Camera watchdog monitor error")
         logger.info("Camera watchdog monitor stopped")

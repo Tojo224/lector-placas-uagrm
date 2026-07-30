@@ -45,6 +45,7 @@ class OCRCandidate:
     xyxy: np.ndarray
     valid_format: bool
     score: float
+    detector_confidence: float = 0.0
 
 
 def _error(message: str, http_status: int = 422, error_code: str = "pipeline_error") -> dict:
@@ -135,6 +136,63 @@ def _encode_image(image: np.ndarray) -> str | None:
     return f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}" if encoded else None
 
 
+def _build_candidates_from_predictions(
+    predictions, offset: tuple[int, int], image_shape: tuple[int, ...]
+) -> tuple[list[OCRCandidate], list[list[float]]]:
+    raw_bboxes: list[list[float]] = []
+    candidates: list[OCRCandidate] = []
+    for prediction in predictions or []:
+        detection = getattr(prediction, "detection", None)
+        box = getattr(detection, "bounding_box", None) if detection is not None else None
+        if box is None:
+            continue
+        xyxy = np.asarray(
+            [box.x1 + offset[0], box.y1 + offset[1], box.x2 + offset[0], box.y2 + offset[1]],
+            dtype=np.float32,
+        )
+        raw_bboxes.append(xyxy.tolist())
+        ocr = getattr(prediction, "ocr", None)
+        if ocr is None:
+            continue
+        candidate = _make_candidate(
+            str(getattr(ocr, "text", "")),
+            _confidence_value(getattr(ocr, "confidence", 0.0)),
+            xyxy,
+            image_shape,
+        )
+        if candidate is not None:
+            candidates.append(
+                OCRCandidate(
+                    raw_text=candidate.raw_text,
+                    normalized_text=candidate.normalized_text,
+                    confidence=candidate.confidence,
+                    xyxy=candidate.xyxy,
+                    valid_format=candidate.valid_format,
+                    score=candidate.score,
+                    detector_confidence=float(getattr(detection, "confidence", 0.0)),
+                )
+            )
+    return candidates, raw_bboxes
+
+
+def _select_best_candidate(
+    candidates: list[OCRCandidate],
+) -> tuple[OCRCandidate | None, float | None]:
+    if not candidates:
+        return None, None
+    candidates.sort(
+        key=lambda candidate: (
+            candidate.valid_format,
+            candidate.score,
+            candidate.confidence,
+            candidate.detector_confidence,
+        ),
+        reverse=True,
+    )
+    selected = candidates[0]
+    return selected, selected.detector_confidence
+
+
 def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offset: tuple[int, int], plate_engine: Any, realtime: bool) -> dict:
     _t0 = time.monotonic()
     fallback_used = False
@@ -172,27 +230,11 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
                 "raw_bboxes": [],
             }
 
-    raw_bboxes: list[list[float]] = []
-    candidates: list[tuple[OCRCandidate, float]] = []
-    for prediction in predictions or []:
-        detection = getattr(prediction, "detection", None)
-        box = getattr(detection, "bounding_box", None) if detection is not None else None
-        if box is None:
-            continue
-        xyxy = np.asarray([box.x1 + offset[0], box.y1 + offset[1], box.x2 + offset[0], box.y2 + offset[1]], dtype=np.float32)
-        raw_bboxes.append(xyxy.tolist())
-        ocr = getattr(prediction, "ocr", None)
-        if ocr is None:
-            continue
-        candidate = _make_candidate(str(getattr(ocr, "text", "")), _confidence_value(getattr(ocr, "confidence", 0.0)), xyxy, image.shape)
-        if candidate is not None:
-            candidates.append((candidate, float(getattr(detection, "confidence", 0.0))))
-
-    if not candidates:
+    candidates, raw_bboxes = _build_candidates_from_predictions(predictions, offset, image.shape)
+    selected, detector_confidence = _select_best_candidate(candidates)
+    if selected is None or detector_confidence is None:
         return {"status": "LOW_CONFIDENCE", "message": "FastPlateOCR no encontro una placa legible en la imagen.", "fallback_attempted": fallback_used, "detection_backend": PIPELINE_MODE, "requires_manual_review": True, "raw_bboxes": raw_bboxes}
 
-    candidates.sort(key=lambda item: (item[0].valid_format, item[0].score, item[0].confidence, item[1]), reverse=True)
-    selected, detector_confidence = candidates[0]
     confirmed = selected.valid_format and selected.confidence >= settings.OCR_CONFIDENCE_THRESHOLD
     combined_confidence = float(np.clip(_COMBINED_OCR_WEIGHT * selected.confidence + _COMBINED_DETECTOR_WEIGHT * detector_confidence, 0.0, 1.0))
     result = {
