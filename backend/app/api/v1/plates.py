@@ -88,6 +88,207 @@ async def _trigger_barrier_webhook(url: str, direction: str) -> None:
         pass  # Barrera offline no es error critico del sistema
 
 
+async def _validate_upload(file: UploadFile) -> bytes:
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400, 
+            detail="Formato de archivo no permitido. Solo se aceptan imágenes JPEG y PNG."
+        )
+    image_bytes = await file.read(MAX_FILE_SIZE + 1)
+    if len(image_bytes) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413, 
+            detail="El archivo es demasiado grande. El límite máximo es de 5MB."
+        )
+    return image_bytes
+
+
+async def _enrich_with_detection(
+    result_dict: dict,
+    image_bytes: bytes,
+    request: Request,
+    db: AsyncSession,
+) -> dict | None:
+    if not result_dict.get("plate_bbox"):
+        return None
+    vehicle_detector = getattr(request.app.state, "vehicle_detector", None)
+    clip_classifier = getattr(request.app.state, "clip_color_classifier", None)
+    association = None
+    type_result = VehicleTypeResult(None, 0.0, "DESCONOCIDO")
+    suggested_type_name = None
+    color_result = None
+    if vehicle_detector is not None:
+        association = await run_in_threadpool(
+            VehicleAssociationService(vehicle_detector).detect_bytes,
+            image_bytes,
+            result_dict.get("plate_bbox"),
+        )
+        type_catalog = list((await db.execute(
+            select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
+        )).scalars().all())
+        type_result = VehicleTypeSuggester.resolve(association, type_catalog)
+        if type_result.tipo_sugerido_id is not None:
+            suggested_type_name = next(
+                (item.nombre for item in type_catalog if item.id == type_result.tipo_sugerido_id),
+                None,
+            )
+    if association is not None and clip_classifier is not None:
+        color_result = await run_in_threadpool(
+            HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
+            image_bytes,
+            result_dict.get("plate_bbox"),
+            association,
+        )
+    return {
+        "type_result": type_result,
+        "suggested_type_name": suggested_type_name,
+        "color_result": color_result,
+    }
+
+
+async def _handle_cooldown(vehicle_id: int, db: AsyncSession) -> bool:
+    last_acceso_query = (
+        select(Acceso)
+        .join(Escaneado)
+        .where(Escaneado.vehiculo_id == vehicle_id)
+        .order_by(Acceso.creado_el.desc())
+        .limit(1)
+        .with_for_update(of=Acceso)
+    )
+    last_acceso_res = await db.execute(last_acceso_query)
+    last_acceso = last_acceso_res.scalar_one_or_none()
+    if not last_acceso:
+        return False
+    cooldown = timedelta(seconds=settings.CAMERA_DUPLICATE_COOLDOWN_SECONDS)
+    now_utc = datetime.now(timezone.utc)
+    last_time = last_acceso.creado_el
+    if last_time.tzinfo is None:
+        last_time = last_time.replace(tzinfo=timezone.utc)
+    return now_utc - last_time < cooldown
+
+
+async def _register_access(
+    vehicle: Vehiculo,
+    scan: Escaneado,
+    dispositivo: Dispositivo | None,
+    image_bytes: bytes,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks,
+) -> Acceso:
+    tipo_acceso = None
+    if dispositivo:
+        name_lower = dispositivo.nombre.lower()
+        if "entrada" in name_lower or "ingreso" in name_lower:
+            tipo_acceso = TipoAccesoEnum.ENTRADA
+        elif "salida" in name_lower or "egreso" in name_lower:
+            tipo_acceso = TipoAccesoEnum.SALIDA
+    if tipo_acceso is None:
+        estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
+        estado_campus = estado_res.scalars().first()
+        if estado_campus and estado_campus.estado == UbicacionVehiculoEnum.DENTRO:
+            tipo_acceso = TipoAccesoEnum.SALIDA
+        else:
+            tipo_acceso = TipoAccesoEnum.ENTRADA
+    ubicacion_acceso = dispositivo.ubicacion if dispositivo else "Portería Principal"
+    log = Acceso(
+        tipo_acceso=tipo_acceso,
+        ubicacion=ubicacion_acceso,
+        escaneado=scan,
+        operador_usuario_id=None,
+    )
+    db.add(log)
+    media_type = (
+        MediaTypeEnum.ACCESS_ENTRY
+        if tipo_acceso == TipoAccesoEnum.ENTRADA
+        else MediaTypeEnum.ACCESS_EXIT
+    )
+    media_uuid = uuid.uuid4()
+    media = ArchivoMultimedia(
+        id=media_uuid,
+        proveedor=MediaProviderEnum.CLOUDINARY,
+        tipo=media_type,
+        estado=MediaStatusEnum.PENDING,
+        resource_type="image",
+        delivery_type=settings.CLOUDINARY_DELIVERY_TYPE,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.MEDIA_ACCESS_RETENTION_DAYS),
+    )
+    db.add(media)
+    spool_path = spool_directory() / f"{media_uuid}.upload"
+    await asyncio.to_thread(spool_path.write_bytes, image_bytes)
+    media.spool_path = str(spool_path)
+    log.imagen = media
+    estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
+    estado_campus = estado_res.scalars().first()
+    nuevo_estado = UbicacionVehiculoEnum.DENTRO if tipo_acceso == TipoAccesoEnum.ENTRADA else UbicacionVehiculoEnum.FUERA
+    if estado_campus:
+        estado_campus.estado = nuevo_estado
+        estado_campus.ultimo_acceso = log
+    else:
+        estado_campus = EstadoCampus(
+            vehiculo_id=vehicle.id,
+            estado=nuevo_estado,
+            ultimo_acceso=log,
+        )
+        db.add(estado_campus)
+    background_tasks.add_task(process_media_record, media_uuid)
+    await db.flush()
+    if dispositivo and dispositivo.webhook_url:
+        background_tasks.add_task(
+            _trigger_barrier_webhook,
+            dispositivo.webhook_url,
+            tipo_acceso.value,
+        )
+    return log
+
+
+def _build_plate_response(
+    result_dict: dict,
+    vehicle: Vehiculo | None,
+    acceso_id: int | None,
+    tipo_acceso_registrado: str | None,
+    solicitud_id: int | None,
+    color_result,
+    type_result: VehicleTypeResult,
+    suggested_type_name: str | None,
+    realtime: bool,
+) -> PlateAnalysisResponse:
+    return PlateAnalysisResponse(
+        estado="DETECTADO" if result_dict.get("status") == "DETECTED" else ("BAJA_CONFIANZA" if result_dict.get("status") == "LOW_CONFIDENCE" else result_dict.get("status")),
+        placa_detectada=result_dict.get("detected_plate"),
+        placa_normalizada=result_dict.get("normalized_plate"),
+        es_formato_valido=result_dict.get("is_valid_bolivian_format", False),
+        confianza=result_dict.get("combined_confidence"),
+        ruta_imagen=result_dict.get("annotated_image") or result_dict.get("plate_crop"),
+        plate_bbox=result_dict.get("plate_bbox"),
+        raw_bboxes=result_dict.get("raw_bboxes"),
+        solicitud_id=solicitud_id,
+        vehiculo_id=vehicle.id if vehicle else None,
+        acceso_id=acceso_id,
+        tipo_acceso=tipo_acceso_registrado,
+        es_registrado=vehicle is not None,
+        propietario_nombre=(
+            f"{vehicle.propietario.nombre} {vehicle.propietario.apellido_paterno}".strip()
+            if (vehicle and vehicle.propietario) else None
+        ),
+        color_sugerido=color_result.color_sugerido if color_result else (
+            "DESCONOCIDO" if not realtime else None
+        ),
+        confianza_color=color_result.confianza_color if color_result else (
+            0.0 if not realtime else None
+        ),
+        metodo_color=color_result.metodo_color if color_result else (
+            "DESCONOCIDO" if not realtime else None
+        ),
+        tipo_sugerido_id=type_result.tipo_sugerido_id if not realtime else None,
+        tipo_sugerido=suggested_type_name if not realtime else None,
+        confianza_tipo=type_result.confianza_tipo if not realtime else None,
+        metodo_tipo=type_result.metodo_tipo if not realtime else None,
+        ocr_unavailable=result_dict.get("ocr_unavailable", False),
+        fallback_attempted=result_dict.get("fallback_attempted", False),
+        mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message")),
+    )
+
+
 @router.post("/analyze", response_model=PlateAnalysisResponse)
 @limiter.limit("60/minute")
 async def analyze_plate_endpoint(
@@ -99,20 +300,8 @@ async def analyze_plate_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_scanner)
 ):
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
-        raise HTTPException(
-            status_code=400, 
-            detail="Formato de archivo no permitido. Solo se aceptan imágenes JPEG y PNG."
-        )
-    
-    image_bytes = await file.read(MAX_FILE_SIZE + 1)
-    
-    if len(image_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413, 
-            detail="El archivo es demasiado grande. El límite máximo es de 5MB."
-        )
-    
+    image_bytes = await _validate_upload(file)
+
     plate_engine = getattr(request.app.state, "fast_alpr_engine", None)
     if plate_engine is None:
         raise HTTPException(
@@ -122,12 +311,7 @@ async def analyze_plate_endpoint(
 
     try:
         result_dict = await asyncio.wait_for(
-            run_in_threadpool(
-                analyze_plate,
-                image_bytes,
-                realtime,
-                plate_engine,
-            ),
+            run_in_threadpool(analyze_plate, image_bytes, realtime, plate_engine),
             timeout=settings.OCR_INFERENCE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -144,7 +328,7 @@ async def analyze_plate_endpoint(
                 mensaje=result_dict.get("message", "Error desconocido durante el análisis."),
             ).model_dump(),
         )
-    
+
     status_val = result_dict.get("status")
     vehicle = None
     acceso_id = None
@@ -154,41 +338,16 @@ async def analyze_plate_endpoint(
     type_result = VehicleTypeResult(None, 0.0, "DESCONOCIDO")
     suggested_type_name = None
 
-    # Una imagen estatica obtiene sugerencia aunque la placa ya este registrada,
-    # el OCR requiera revision o no termine creando una solicitud. El modo
-    # realtime evita ejecutar detector vehicular + CLIP en cada frame.
-    if not realtime and result_dict.get("plate_bbox"):
-        vehicle_detector = getattr(request.app.state, "vehicle_detector", None)
-        clip_classifier = getattr(request.app.state, "clip_color_classifier", None)
-        association = None
-        if vehicle_detector is not None:
-            association = await run_in_threadpool(
-                VehicleAssociationService(vehicle_detector).detect_bytes,
-                image_bytes,
-                result_dict.get("plate_bbox"),
-            )
-            type_catalog = list((await db.execute(
-                select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
-            )).scalars().all())
-            type_result = VehicleTypeSuggester.resolve(association, type_catalog)
-            if type_result.tipo_sugerido_id is not None:
-                suggested_type_name = next(
-                    (item.nombre for item in type_catalog if item.id == type_result.tipo_sugerido_id),
-                    None,
-                )
-        if association is not None and clip_classifier is not None:
-            color_result = await run_in_threadpool(
-                HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
-                image_bytes,
-                result_dict.get("plate_bbox"),
-                association,
-            )
-    # El análisis anónimo devuelve solo el resultado OCR. Consultas de vehículos,
-    # escaneos, accesos y evidencias requieren una identidad autenticada.
+    if not realtime:
+        detection = await _enrich_with_detection(result_dict, image_bytes, request, db)
+        if detection:
+            type_result = detection["type_result"]
+            suggested_type_name = detection["suggested_type_name"]
+            color_result = detection["color_result"]
+
     if status_val in ["DETECTED", "LOW_CONFIDENCE"]:
         normalized = result_dict.get("normalized_plate")
-        
-        vehicle = None
+
         if normalized:
             normalized = normalized.replace("-", "").replace(" ", "").upper().strip()
             v_res = await db.execute(
@@ -210,8 +369,6 @@ async def analyze_plate_endpoint(
             except ValueError:
                 pass
 
-        # Si no hay dispositivo_id explícito pero el usuario autenticado es DISPOSITIVO,
-        # resolver automáticamente por nombre (según convención del sistema)
         if current_user.rol == RoleEnum.DISPOSITIVO:
             dispositivo = None
             disp_uuid = None
@@ -234,133 +391,25 @@ async def analyze_plate_endpoint(
             confianza=confidence,
             estado=estado_enum,
             vehiculo_id=vehicle.id if vehicle else None,
-            dispositivo_id=disp_uuid
+            dispositivo_id=disp_uuid,
         )
         db.add(scan)
-        
+
         if vehicle:
-            # Lock the vehicle row so the first-access check is serialized even
-            # when no Acceso row exists yet.
             await db.execute(
                 select(Vehiculo).where(Vehiculo.id == vehicle.id).with_for_update()
             )
-            # Check if there is a recent access for this vehicle to prevent duplicates (cooldown)
-            # TOCTOU-001: FOR UPDATE sobre Acceso para serializar el cooldown.
-            # Solo lockea filas de Acceso (OF Acceso), no Escaneado.
-            # Si dos requests llegan simultáneamente, el segundo espera el lock
-            # hasta que el primero haga commit. La ventana de lock es breve:
-            # solo el SELECT + check de cooldown, antes del I/O de imágenes.
-            last_acceso_query = (
-                select(Acceso)
-                .join(Escaneado)
-                .where(Escaneado.vehiculo_id == vehicle.id)
-                .order_by(Acceso.creado_el.desc())
-                .limit(1)
-                .with_for_update(of=Acceso)
-            )
-            last_acceso_res = await db.execute(last_acceso_query)
-            last_acceso = last_acceso_res.scalar_one_or_none()
 
-            cooldown = timedelta(seconds=settings.CAMERA_DUPLICATE_COOLDOWN_SECONDS)
-            now_utc = datetime.now(timezone.utc)
-            is_duplicate = False
-            if last_acceso:
-                last_time = last_acceso.creado_el
-                if last_time.tzinfo is None:
-                    last_time = last_time.replace(tzinfo=timezone.utc)
-                if now_utc - last_time < cooldown:
-                    is_duplicate = True
-                    logger.info("Acceso duplicado para vehiculo %s omitido en el backend (cooldown)", vehicle.placa)
+            if await _handle_cooldown(vehicle.id, db):
+                logger.info("Acceso duplicado para vehiculo %s omitido en el backend (cooldown)", vehicle.placa)
+            else:
+                acceso = await _register_access(vehicle, scan, dispositivo, image_bytes, db, background_tasks)
+                acceso_id = acceso.id
+                tipo_acceso_registrado = acceso.tipo_acceso.value
 
-            if not is_duplicate:
-                # 1. Determinar el tipo de acceso (ENTRADA o SALIDA)
-                tipo_acceso = None
-                if dispositivo:
-                    name_lower = dispositivo.nombre.lower()
-                    if "entrada" in name_lower or "ingreso" in name_lower:
-                        tipo_acceso = TipoAccesoEnum.ENTRADA
-                    elif "salida" in name_lower or "egreso" in name_lower:
-                        tipo_acceso = TipoAccesoEnum.SALIDA
-                
-                if tipo_acceso is None:
-                    # Consultar el último estado en el campus del vehículo
-                    estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
-                    estado_campus = estado_res.scalars().first()
-                    if estado_campus and estado_campus.estado == UbicacionVehiculoEnum.DENTRO:
-                        tipo_acceso = TipoAccesoEnum.SALIDA
-                    else:
-                        tipo_acceso = TipoAccesoEnum.ENTRADA
-
-                # 2. Registrar el acceso
-                ubicacion_acceso = dispositivo.ubicacion if dispositivo else "Portería Principal"
-                log = Acceso(
-                    tipo_acceso=tipo_acceso,
-                    ubicacion=ubicacion_acceso,
-                    escaneado=scan,
-                    operador_usuario_id=None
-                )
-                db.add(log)
-
-                # 3. Guardar imagen de evidencia
-                media_type = (
-                    MediaTypeEnum.ACCESS_ENTRY
-                    if tipo_acceso == TipoAccesoEnum.ENTRADA
-                    else MediaTypeEnum.ACCESS_EXIT
-                )
-                
-                # Generar el UUID manualmente para evitar la necesidad de flush
-                media_uuid = uuid.uuid4()
-                media = ArchivoMultimedia(
-                    id=media_uuid,
-                    proveedor=MediaProviderEnum.CLOUDINARY,
-                    tipo=media_type,
-                    estado=MediaStatusEnum.PENDING,
-                    resource_type="image",
-                    delivery_type=settings.CLOUDINARY_DELIVERY_TYPE,
-                    expires_at=datetime.now(timezone.utc) + timedelta(days=settings.MEDIA_ACCESS_RETENTION_DAYS),
-                )
-                db.add(media)
-
-                # Spool local de la imagen usando el UUID generado
-                spool_path = spool_directory() / f"{media_uuid}.upload"
-                await asyncio.to_thread(spool_path.write_bytes, image_bytes)
-                media.spool_path = str(spool_path)
-                log.imagen = media
-
-                # 4. Actualizar EstadoCampus
-                estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
-                estado_campus = estado_res.scalars().first()
-                nuevo_estado = UbicacionVehiculoEnum.DENTRO if tipo_acceso == TipoAccesoEnum.ENTRADA else UbicacionVehiculoEnum.FUERA
-                if estado_campus:
-                    estado_campus.estado = nuevo_estado
-                    estado_campus.ultimo_acceso = log
-                else:
-                    estado_campus = EstadoCampus(
-                        vehiculo_id=vehicle.id,
-                        estado=nuevo_estado,
-                        ultimo_acceso=log
-                    )
-                    db.add(estado_campus)
-
-                # 5. Encolar tarea de subida a Cloudinary
-                background_tasks.add_task(process_media_record, media_uuid)
-
-                # Registrar para la respuesta
-                await db.flush()
-                acceso_id = log.id
-                tipo_acceso_registrado = tipo_acceso.value
-
-                # 6. Disparar webhook de barrera si el dispositivo tiene URL configurada
-                if dispositivo and dispositivo.webhook_url:
-                    background_tasks.add_task(
-                        _trigger_barrier_webhook,
-                        dispositivo.webhook_url,
-                        tipo_acceso.value
-                    )
- 
         try:
             await db.flush()
-            # El polling nunca persiste evidencias ni crea solicitudes.
+
             if (not realtime and status_val == "DETECTED" and normalized and
                     result_dict.get("is_valid_bolivian_format", False) and
                     vehicle is None):
@@ -405,40 +454,16 @@ async def analyze_plate_endpoint(
                 ).model_dump(),
             )
 
-    # Mapeo de la respuesta
-    return PlateAnalysisResponse(
-        estado="DETECTADO" if result_dict.get("status") == "DETECTED" else ("BAJA_CONFIANZA" if result_dict.get("status") == "LOW_CONFIDENCE" else result_dict.get("status")),
-        placa_detectada=result_dict.get("detected_plate"),
-        placa_normalizada=result_dict.get("normalized_plate"),
-        es_formato_valido=result_dict.get("is_valid_bolivian_format", False),
-        confianza=result_dict.get("combined_confidence"),
-        ruta_imagen=result_dict.get("annotated_image") or result_dict.get("plate_crop"),
-        plate_bbox=result_dict.get("plate_bbox"),
-        raw_bboxes=result_dict.get("raw_bboxes"),
-        solicitud_id=solicitud_id,
-        vehiculo_id=vehicle.id if vehicle else None,
+    return _build_plate_response(
+        result_dict=result_dict,
+        vehicle=vehicle,
         acceso_id=acceso_id,
-        tipo_acceso=tipo_acceso_registrado,
-        es_registrado=vehicle is not None,
-        # SEC-011: Solo exponer datos del propietario a usuarios autenticados
-        propietario_nombre=(
-            f"{vehicle.propietario.nombre} {vehicle.propietario.apellido_paterno}".strip()
-            if (vehicle and vehicle.propietario) else None
-        ),
-        color_sugerido=color_result.color_sugerido if color_result else (
-            "DESCONOCIDO" if not realtime else None
-        ),
-        confianza_color=color_result.confianza_color if color_result else (
-            0.0 if not realtime else None
-        ),
-        metodo_color=color_result.metodo_color if color_result else (
-            "DESCONOCIDO" if not realtime else None
-        ),
-        tipo_sugerido_id=type_result.tipo_sugerido_id if not realtime else None,
-        tipo_sugerido=suggested_type_name if not realtime else None,
-        confianza_tipo=type_result.confianza_tipo if not realtime else None,
-        metodo_tipo=type_result.metodo_tipo if not realtime else None,
-        mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message"))
+        tipo_acceso_registrado=tipo_acceso_registrado,
+        solicitud_id=solicitud_id,
+        color_result=color_result,
+        type_result=type_result,
+        suggested_type_name=suggested_type_name,
+        realtime=realtime,
     )
 
 

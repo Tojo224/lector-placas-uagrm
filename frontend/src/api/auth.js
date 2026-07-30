@@ -57,11 +57,8 @@ function mapAuthError(error, fallbackMessage) {
 }
 
 function normalizeSession(data) {
-  if (data?.user && data?.token) {
-    return {
-      token: data.token,
-      user: data.user
-    };
+  if (data?.user) {
+    return { user: data.user };
   }
 
   throw new Error("El servidor devolvió una respuesta de autenticación inválida. Contacta al administrador.");

@@ -1,8 +1,8 @@
 const AUTH_KEY = "lector_placas_session";
 
 export function saveSession(session) {
-  // Guardamos usuario y token para soportar Authorization: Bearer token en cross-origin
-  localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+  const data = { user: session?.user ?? null };
+  localStorage.setItem(AUTH_KEY, JSON.stringify(data));
 }
 
 export function readSession() {

@@ -43,6 +43,7 @@ from app.api.v1.registration_requests import router as registration_requests_rou
 from app.api.v1.vehicles import router as vehicles_router
 from app.config.settings import settings
 from app.db.session import database_target
+from app.services.camera_watchdog import CameraWatchdog
 from app.services.clip_color import CLIPColorClassifier
 
 logger = logging.getLogger(__name__)
@@ -166,7 +167,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.exception("Detector vehicular/CLIP no pudo inicializarse")
 
     app.state.ocr_engine_name = "fast_alpr" if app.state.fast_alpr_engine is not None else "unavailable"
+
+    watchdog = CameraWatchdog()
+    watchdog.start()
+    app.state.camera_watchdog = watchdog
     yield
+    watchdog.stop()
+    if hasattr(app.state, "camera_watchdog"):
+        delattr(app.state, "camera_watchdog")
     for state_name in ("fast_alpr_engine", "vehicle_detector", "clip_color_classifier", "ocr_engine_name"):
         if hasattr(app.state, state_name):
             delattr(app.state, state_name)

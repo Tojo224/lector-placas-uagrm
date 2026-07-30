@@ -3,6 +3,7 @@ import uuid
 from app.api.v1.auth import require_admin
 from app.db.models import Dispositivo, TipoDispositivo, Usuario
 from app.db.session import get_db
+from app.schemas.camera import CameraStatus
 from app.schemas.device import (
     DispositivoCreate,
     DispositivoResponse,
@@ -10,13 +11,23 @@ from app.schemas.device import (
     TipoDispositivoCreate,
     TipoDispositivoResponse,
 )
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 router = APIRouter()
+
+
+@router.get("/health", response_model=CameraStatus)
+async def camera_health(request: Request):
+    watchdog = getattr(request.app.state, "camera_watchdog", None)
+    if watchdog is None:
+        return CameraStatus(alive=False, start_count=0)
+    watchdog.ensure_alive()
+    health = watchdog.health()
+    return CameraStatus(**health)
 
 
 # ── TIPOS DE DISPOSITIVOS ──────────────────────────────────────────

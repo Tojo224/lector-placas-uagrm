@@ -31,9 +31,9 @@ export function AuthProvider({ children }) {
   const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
-    const session = readSession();
-    if (session?.user) {
-      setUser(session.user);
+    const data = readSession();
+    if (data?.user) {
+      setUser(data.user);
     }
     setAuthLoading(false);
   }, []);

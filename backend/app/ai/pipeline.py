@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,11 @@ _SCORE_LENGTH_WEIGHT = 0.08
 _SCORE_ASPECT_WEIGHT = 0.03
 _SCORE_SIZE_WEIGHT = 0.02
 _SCORE_POSITION_WEIGHT = 0.02
+
+# Combined confidence: weight between OCR confidence and detector confidence
+_COMBINED_OCR_WEIGHT = 0.70
+_COMBINED_DETECTOR_WEIGHT = 0.30
+
 
 box_annotator = sv.BoxAnnotator(thickness=2, color_lookup=sv.ColorLookup.INDEX)
 label_annotator = sv.LabelAnnotator(text_scale=0.5, color_lookup=sv.ColorLookup.INDEX)
@@ -134,11 +140,21 @@ def _encode_image(image: np.ndarray) -> str | None:
 
 
 def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offset: tuple[int, int], plate_engine: Any, realtime: bool) -> dict:
+    _t0 = time.monotonic()
     try:
         predictions = plate_engine.predict(analysis_region)
     except Exception:
-        logger.exception("FastALPR/FastPlateOCR fallo durante la inferencia")
-        return _error("Error durante la inferencia FastPlateOCR.", 500, "ocr_inference_error")
+        elapsed = time.monotonic() - _t0
+        logger.error("FastALPR/FastPlateOCR inference failed after %.3fs", elapsed, exc_info=True)
+        return {
+            "status": "DEGRADED",
+            "message": "El motor OCR primario falló durante la inferencia.",
+            "fallback_attempted": False,
+            "ocr_unavailable": True,
+            "detection_backend": PIPELINE_MODE,
+            "requires_manual_review": True,
+            "raw_bboxes": [],
+        }
 
     raw_bboxes: list[list[float]] = []
     candidates: list[tuple[OCRCandidate, float]] = []
@@ -162,7 +178,7 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
     candidates.sort(key=lambda item: (item[0].valid_format, item[0].score, item[0].confidence, item[1]), reverse=True)
     selected, detector_confidence = candidates[0]
     confirmed = selected.valid_format and selected.confidence >= settings.OCR_CONFIDENCE_THRESHOLD
-    combined_confidence = float(np.clip(0.70 * selected.confidence + 0.30 * detector_confidence, 0.0, 1.0))
+    combined_confidence = float(np.clip(_COMBINED_OCR_WEIGHT * selected.confidence + _COMBINED_DETECTOR_WEIGHT * detector_confidence, 0.0, 1.0))
     result = {
         "status": "DETECTED" if confirmed else "LOW_CONFIDENCE",
         "message": None if confirmed else "La lectura FastPlateOCR requiere revision manual.",
@@ -200,4 +216,18 @@ def analyze_plate(image_bytes: bytes, realtime: bool = False, plate_engine=None)
         analysis_region, offset = _extract_analysis_region(image)
     except ValueError as exc:
         return _error(str(exc), 422, "invalid_roi")
-    return _analyze_with_fast_alpr(image, analysis_region, offset, plate_engine, realtime)
+    _t0 = time.monotonic()
+    try:
+        return _analyze_with_fast_alpr(image, analysis_region, offset, plate_engine, realtime)
+    except Exception:
+        elapsed = time.monotonic() - _t0
+        logger.error("FastALPR/FastPlateOCR pipeline crashed after %.3fs", elapsed, exc_info=True)
+        return {
+            "status": "DEGRADED",
+            "message": "Error inesperado en el pipeline de análisis.",
+            "fallback_attempted": False,
+            "ocr_unavailable": True,
+            "detection_backend": PIPELINE_MODE,
+            "requires_manual_review": True,
+            "raw_bboxes": [],
+        }

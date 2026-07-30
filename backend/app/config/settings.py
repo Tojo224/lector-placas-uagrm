@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     OCR_DENOISE: bool = True
     OCR_USE_THRESHOLD: bool = False
     OCR_INFERENCE_TIMEOUT_SECONDS: float = 30.0
+    OCR_FALLBACK_ENABLED: bool = False
     OCR_ROI_X: int | None = None
     OCR_ROI_Y: int | None = None
     OCR_ROI_WIDTH: int | None = None

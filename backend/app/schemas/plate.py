@@ -28,7 +28,7 @@ class EscaneadoResponse(BaseModel):
 
 
 class PlateAnalysisResponse(BaseModel):
-    estado: str  # DETECTADO | BAJA_CONFIANZA | ERROR | MANUAL
+    estado: str  # DETECTADO | BAJA_CONFIANZA | DEGRADADO | ERROR | MANUAL
     placa_detectada: str | None = None
     placa_normalizada: str | None = None
     es_formato_valido: bool = False
@@ -50,4 +50,6 @@ class PlateAnalysisResponse(BaseModel):
     tipo_sugerido: str | None = None
     confianza_tipo: float | None = None
     metodo_tipo: str | None = None
+    ocr_unavailable: bool = False
+    fallback_attempted: bool = False
 
