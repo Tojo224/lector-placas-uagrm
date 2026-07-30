@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import hmac
+
 import jwt
 from app.config.settings import settings
 from app.core.limiter import limiter
@@ -117,6 +119,33 @@ async def require_scanner(current_user: Usuario = Depends(get_current_user)) -> 
     }:
         raise HTTPException(status_code=403, detail="No autorizado para escanear placas.")
     return current_user
+
+
+_API_TOKEN_USER: Usuario | None = None
+
+
+def _get_api_token_user() -> Usuario:
+    global _API_TOKEN_USER
+    if _API_TOKEN_USER is None:
+        _API_TOKEN_USER = Usuario(
+            id=UUID("00000000-0000-0000-0000-000000000000"),
+            nombre="Camara",
+            apellido_paterno="Sistema",
+            carnet="CAMARA_SISTEMA",
+            rol=RoleEnum.DISPOSITIVO,
+            esta_activo=True,
+        )
+    return _API_TOKEN_USER
+
+
+async def require_scanner_or_api_token(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Usuario:
+    if settings.CAMERA_API_TOKEN and token and hmac.compare_digest(token, settings.CAMERA_API_TOKEN):
+        return _get_api_token_user()
+    return await require_scanner(current_user=await get_current_user(request, token, db))
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)

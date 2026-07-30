@@ -15,6 +15,7 @@ export const AuthContext = createContext({
   signInLoading: false,
   signUpLoading: false,
   profileSaving: false,
+  authError: null,
   signIn: async () => {},
   signUp: async () => {},
   signOut: async () => {},
@@ -29,6 +30,7 @@ export function AuthProvider({ children }) {
   const [signInLoading, setSignInLoading] = useState(false);
   const [signUpLoading, setSignUpLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
     const data = readSession();
@@ -49,12 +51,16 @@ export function AuthProvider({ children }) {
 
   const signIn = async (credentials) => {
     setSignInLoading(true);
+    setAuthError(null);
 
     try {
       const session = await loginUser(credentials);
       saveSession(session);
       setUser(session.user);
       return session;
+    } catch (error) {
+      setAuthError(error?.message || "Error al iniciar sesión");
+      throw error;
     } finally {
       setSignInLoading(false);
     }
@@ -68,12 +74,16 @@ export function AuthProvider({ children }) {
 
   const signUp = async (payload) => {
     setSignUpLoading(true);
+    setAuthError(null);
 
     try {
       const session = await registerUser(payload);
       saveSession(session);
       setUser(session.user);
       return session;
+    } catch (error) {
+      setAuthError(error?.message || "Error al registrarse");
+      throw error;
     } finally {
       setSignUpLoading(false);
     }
@@ -115,6 +125,7 @@ export function AuthProvider({ children }) {
         signInLoading,
         signUpLoading,
         profileSaving,
+        authError,
         signIn,
         signUp,
         signOut,

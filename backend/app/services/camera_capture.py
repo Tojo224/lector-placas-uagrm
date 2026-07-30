@@ -115,14 +115,17 @@ def _build_multipart_request(api_url: str, jpeg_bytes: bytes) -> Request:
         'Content-Disposition: form-data; name="file"; filename="camera-frame.jpg"\r\n'
         "Content-Type: image/jpeg\r\n\r\n"
     ).encode("ascii") + jpeg_bytes + f"\r\n--{boundary}--\r\n".encode("ascii")
+    headers: dict[str, str] = {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(body)),
+    }
+    if settings.CAMERA_API_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.CAMERA_API_TOKEN}"
     return Request(
         api_url,
         data=body,
         method="POST",
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Content-Length": str(len(body)),
-        },
+        headers=headers,
     )
 
 

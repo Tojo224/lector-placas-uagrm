@@ -1,8 +1,12 @@
 const AUTH_KEY = "lector_placas_session";
 
 export function saveSession(session) {
-  const data = { user: session?.user ?? null };
-  localStorage.setItem(AUTH_KEY, JSON.stringify(data));
+  try {
+    const data = { user: session?.user ?? null };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(data));
+  } catch {
+    // Fail silently — app still works in memory
+  }
 }
 
 export function readSession() {
@@ -16,5 +20,9 @@ export function readSession() {
 }
 
 export function clearSession() {
-  localStorage.removeItem(AUTH_KEY);
+  try {
+    localStorage.removeItem(AUTH_KEY);
+  } catch {
+    // Fail silently — app still works in memory
+  }
 }

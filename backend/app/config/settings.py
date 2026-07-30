@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list[str]
     DATABASE_URL: str
     CAMERA_API_URL: str = "http://127.0.0.1:8000/api/v1/plates/analyze"
+    CAMERA_API_TOKEN: str = ""
 
     # App Settings
     APP_NAME: str = "Lector de Placas UAGRM"

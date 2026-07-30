@@ -110,19 +110,31 @@ export async function deleteProfile() {
 }
 
 export async function uploadProfilePhoto(userId, file) {
-  const form = new FormData();
-  form.append("file", file);
-  const { data } = await apiClient.post(`/v1/media/users/${userId}/photo`, form);
-  return data;
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await apiClient.post(`/v1/media/users/${userId}/photo`, form);
+    return data;
+  } catch (error) {
+    mapAuthError(error, "No se pudo subir la foto de perfil.");
+  }
 }
 
 export async function deleteProfilePhoto(userId) {
-  await apiClient.delete(`/v1/media/users/${userId}/photo`);
+  try {
+    await apiClient.delete(`/v1/media/users/${userId}/photo`);
+  } catch (error) {
+    mapAuthError(error, "No se pudo eliminar la foto de perfil.");
+  }
 }
 
 export async function getMediaUrl(mediaId) {
-  const { data } = await apiClient.get(`/v1/media/${mediaId}/url`);
-  return data;
+  try {
+    const { data } = await apiClient.get(`/v1/media/${mediaId}/url`);
+    return data;
+  } catch (error) {
+    mapAuthError(error, "No se pudo obtener la URL del archivo.");
+  }
 }
 
 export async function logoutUser() {

@@ -25,7 +25,8 @@ def spool_directory() -> Path:
 
 async def process_media_record(media_id: UUID) -> None:
     """Owns its DB sessions; safe to call from BackgroundTasks or maintenance."""
-    for _ in range(settings.MEDIA_UPLOAD_MAX_RETRIES):
+    for retry_count in range(settings.MEDIA_UPLOAD_MAX_RETRIES):
+        await asyncio.sleep(1 * (retry_count + 1))
         async with AsyncSessionLocal() as session:
             media = await session.get(ArchivoMultimedia, media_id)
             if not media or media.estado in {

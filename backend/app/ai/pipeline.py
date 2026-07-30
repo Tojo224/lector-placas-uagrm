@@ -37,10 +37,6 @@ _COMBINED_OCR_WEIGHT = 0.70
 _COMBINED_DETECTOR_WEIGHT = 0.30
 
 
-box_annotator = sv.BoxAnnotator(thickness=2, color_lookup=sv.ColorLookup.INDEX)
-label_annotator = sv.LabelAnnotator(text_scale=0.5, color_lookup=sv.ColorLookup.INDEX)
-
-
 @dataclass(frozen=True)
 class OCRCandidate:
     raw_text: str
@@ -197,6 +193,8 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
         return result
     selected_detection = sv.Detections(xyxy=np.asarray([selected.xyxy], dtype=np.float32), confidence=np.asarray([combined_confidence], dtype=np.float32), data={"class_name": np.asarray([selected.normalized_text])})
     crop = sv.crop_image(image=image, xyxy=selected.xyxy)
+    box_annotator = sv.BoxAnnotator(thickness=2, color_lookup=sv.ColorLookup.INDEX)
+    label_annotator = sv.LabelAnnotator(text_scale=0.5, color_lookup=sv.ColorLookup.INDEX)
     annotated = box_annotator.annotate(scene=image.copy(), detections=selected_detection)
     annotated = label_annotator.annotate(scene=annotated, detections=selected_detection, labels=[f"{selected.normalized_text} ({combined_confidence:.0%})"])
     result["annotated_image"] = _encode_image(annotated)

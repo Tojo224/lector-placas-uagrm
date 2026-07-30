@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,9 @@ class CameraWatchdog:
         self._check_interval = check_interval
         self._stop_event = threading.Event()
         self._monitor_thread: threading.Thread | None = None
+        self._max_restarts = 5
+        self._restart_window = 300
+        self._restart_times: list[float] = []
 
     @property
     def is_alive(self) -> bool:
@@ -29,9 +33,8 @@ class CameraWatchdog:
         proc = subprocess.Popen(
             [sys.executable, "-m", "app.services.camera_capture"],
             cwd=str(BACKEND_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         logger.info("Camera capture started (PID=%d, attempt=%d)", proc.pid, self._start_count)
         return proc
@@ -89,6 +92,9 @@ class CameraWatchdog:
             "alive": alive,
             "pid": proc.pid if alive and proc is not None else None,
             "start_count": self._start_count,
+            "restart_count": len(self._restart_times),
+            "max_restarts": self._max_restarts,
+            "restart_window": self._restart_window,
             "monitor_active": self._monitor_thread is not None and self._monitor_thread.is_alive(),
         }
 
@@ -96,9 +102,24 @@ class CameraWatchdog:
         logger.info("Camera watchdog monitor started (interval=%.1fs)", self._check_interval)
         while not self._stop_event.wait(self._check_interval):
             try:
-                if not self.is_alive:
-                    old_pid = self._process.pid if self._process is not None else None
+                now = time.monotonic()
+                self._restart_times = [
+                    t for t in self._restart_times if now - t < self._restart_window
+                ]
+                if len(self._restart_times) >= self._max_restarts:
+                    logger.critical("Camera watchdog: max restarts reached in window, stopping")
+                    self._kill_process()
+                    break
+
+                proc = self._process
+                if proc is None or proc.poll() is not None:
+                    old_pid = proc.pid if proc is not None else None
                     logger.warning("Camera monitor: process died (was PID=%s), restarting...", old_pid)
+                    delay = min(60, 2 ** len(self._restart_times))
+                    logger.info("Camera monitor: backing off %.1fs before restart", delay)
+                    if self._stop_event.wait(delay):
+                        break
+                    self._restart_times.append(time.monotonic())
                     self.restart()
             except Exception:
                 logger.exception("Camera watchdog monitor error")

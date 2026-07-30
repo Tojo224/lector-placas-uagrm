@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.ai.pipeline import analyze_plate, get_pipeline_status
-from app.api.v1.auth import require_scanner, require_staff
+from app.api.v1.auth import require_scanner, require_scanner_or_api_token, require_staff
 from app.config.settings import settings
 from app.core.limiter import limiter
 from app.db.models import (
@@ -118,10 +118,13 @@ async def _enrich_with_detection(
     suggested_type_name = None
     color_result = None
     if vehicle_detector is not None:
-        association = await run_in_threadpool(
-            VehicleAssociationService(vehicle_detector).detect_bytes,
-            image_bytes,
-            result_dict.get("plate_bbox"),
+        association = await asyncio.wait_for(
+            run_in_threadpool(
+                VehicleAssociationService(vehicle_detector).detect_bytes,
+                image_bytes,
+                result_dict.get("plate_bbox"),
+            ),
+            timeout=settings.OCR_INFERENCE_TIMEOUT_SECONDS,
         )
         type_catalog = list((await db.execute(
             select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
@@ -182,9 +185,9 @@ async def _register_access(
             tipo_acceso = TipoAccesoEnum.ENTRADA
         elif "salida" in name_lower or "egreso" in name_lower:
             tipo_acceso = TipoAccesoEnum.SALIDA
+    estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
+    estado_campus = estado_res.scalars().first()
     if tipo_acceso is None:
-        estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
-        estado_campus = estado_res.scalars().first()
         if estado_campus and estado_campus.estado == UbicacionVehiculoEnum.DENTRO:
             tipo_acceso = TipoAccesoEnum.SALIDA
         else:
@@ -217,8 +220,6 @@ async def _register_access(
     await asyncio.to_thread(spool_path.write_bytes, image_bytes)
     media.spool_path = str(spool_path)
     log.imagen = media
-    estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
-    estado_campus = estado_res.scalars().first()
     nuevo_estado = UbicacionVehiculoEnum.DENTRO if tipo_acceso == TipoAccesoEnum.ENTRADA else UbicacionVehiculoEnum.FUERA
     if estado_campus:
         estado_campus.estado = nuevo_estado
@@ -298,7 +299,7 @@ async def analyze_plate_endpoint(
     realtime: bool = False,
     dispositivo_id: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(require_scanner)
+    current_user: Usuario = Depends(require_scanner_or_api_token)
 ):
     image_bytes = await _validate_upload(file)
 
@@ -350,11 +351,7 @@ async def analyze_plate_endpoint(
 
         if normalized:
             normalized = normalized.replace("-", "").replace(" ", "").upper().strip()
-            v_res = await db.execute(
-                select(Vehiculo)
-                .options(selectinload(Vehiculo.propietario))
-                .where(Vehiculo.placa == normalized)
-            )
+            v_res = await db.execute(select(Vehiculo).where(Vehiculo.placa == normalized))
             vehicle = v_res.scalars().first()
 
         estado_enum = EstadoEscaneoEnum.DETECTADO if status_val == "DETECTED" else EstadoEscaneoEnum.BAJA_CONFIANZA
