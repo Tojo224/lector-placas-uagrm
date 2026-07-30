@@ -53,7 +53,9 @@ controles aplicables de OWASP ASVS. No está certificado por ISO.
 - Cloudinary autenticado, WebP y URLs temporales;
 - Dockerfiles no-root y Compose con healthchecks;
 - controles CSRF/origen, límites de carga y cabeceras de seguridad backend;
-- pruebas unitarias/integración opt-in y scripts de verificación local.
+- pruebas unitarias/integración opt-in y scripts de verificación local;
+- migraciones automáticas de base de datos y bootstrap seguro del administrador inicial (cargado de variables de entorno) y catálogo base de marcas al arrancar;
+- archivo `netlify.toml` para despliegue automatizado de React Router en Netlify.
 
 ## 5. Funcionalidades parciales
 
@@ -65,11 +67,8 @@ controles aplicables de OWASP ASVS. No está certificado por ISO.
 - El simulador de barrera existe; falta E2E con ESP32/actuador físico.
 - El agente USB/RTSP está implementado; falta calibración con las cámaras finales.
 - El logout elimina la cookie, pero no revoca el JWT en servidor.
-- No hay bootstrap compatible para el primer administrador de una base vacía.
-- Docker está configurado, pero la construcción Linux completa no se validó
-  porque el daemon de Docker Desktop no estaba activo.
-- Railway/Netlify fueron evaluados, pero no existen `railway.toml` ni
-  `netlify.toml` y no se realizó despliegue.
+- Docker está configurado y se repararon los permisos de compilación para usuarios no-root, pero la construcción local Linux no se validó por daemon inactivo.
+- Railway/Netlify fueron evaluados y se configuró `netlify.toml` para el frontend; los despliegues reales están en proceso.
 
 ## 6. Arquitectura vigente
 
@@ -298,14 +297,12 @@ personales reales durante la demostración.
 - rate limiter y caché de usuario in-process;
 - tareas multimedia sin cola durable;
 - health devuelve HTTP 200 aun con estado `degraded`;
-- falta bootstrap inicial de administrador;
 - frontend sin lint;
 - no se midieron p50/p95, memoria, concurrencia ni cold start productivos.
 
 ## 16. Riesgos pendientes
 
 - revocación JWT inexistente después de logout;
-- JWT persistido por el frontend en `localStorage`, con mayor exposición ante XSS;
 - posible pérdida o atasco de spool ante reinicio sin reconciliador;
 - Docker Linux no construido en la última sesión;
 - cookies `SameSite=Lax` requieren diseño de dominios compatible en despliegue;
@@ -363,7 +360,6 @@ arranque después de cada rotación.
 ### P1
 
 - Diseñar/probar cookies y dominios para Railway + Netlify.
-- Crear procedimiento seguro de bootstrap del primer administrador.
 - Construir las imágenes Docker y ejecutar smoke en Linux.
 - Completar E2E de roles, placa conocida/desconocida, Cloudinary y barrera.
 - Incorporar cola/reconciliación durable para evidencias.
@@ -375,7 +371,6 @@ arranque después de cada rotación.
 - Calibrar OCR/color/tipo con dataset propio y cámaras finales.
 - Medir memoria, latencia p50/p95, concurrencia y cold start.
 - Implementar revocación JWT mediante diseño y migración coordinados.
-- Añadir `netlify.toml`/configuración Railway y cabeceras del frontend estático.
 - Añadir lint frontend y automatizar SAST/SCA en CI.
 
 ### P3

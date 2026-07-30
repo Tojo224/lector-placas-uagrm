@@ -220,11 +220,7 @@ el 2026-07-30 está alineada con esa revisión y `alembic check` no detectó nue
 operaciones. Para otra base o una migración futura, haga backup o cree una rama
 de Neon antes de `upgrade head`. No edite ni elimine migraciones aplicadas.
 
-Una base nueva no dispone de un bootstrap vigente para el primer administrador.
-El endpoint de registro exige un administrador autenticado. El propietario debe
-provisionar esa primera cuenta mediante un procedimiento controlado antes de usar
-la interfaz. `backend/seed_db.py` pertenece a un esquema reemplazado y no debe
-ejecutarse.
+Las migraciones de la base de datos se ejecutan de forma automática al arrancar la aplicación. Si la base de datos se encuentra vacía (sin usuarios), el backend sembrará de manera automática el usuario `ADMINISTRADOR` inicial usando las credenciales configuradas en las variables de entorno (`BOOTSTRAP_ADMIN_CARNET` y `BOOTSTRAP_ADMIN_PASSWORD`), además de sembrar el catálogo base de marcas en la tabla `marcas` para permitir la operatividad inmediata del sistema.
 
 ## Ejecución local
 
@@ -453,11 +449,7 @@ y los logs sin copiar secretos. Los endpoints autorizados permiten reintento.
 
 ## Limitaciones conocidas
 
-- No existe bootstrap vigente y automatizado para el primer administrador.
 - El logout borra la cookie, pero no hay revocación JWT en servidor.
-- El frontend vigente conserva el JWT en `localStorage` para enviarlo como
-  Bearer entre dominios; esto aumenta el impacto potencial de una vulnerabilidad
-  XSS y debe revisarse antes de producción.
 - El rate limit y la caché de usuario son locales al proceso, no distribuidos.
 - Las tareas multimedia en segundo plano no sustituyen una cola durable.
 - El health de Railway debería separar liveness y readiness.
