@@ -9,9 +9,10 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+
+import httpx
 
 import cv2
 import numpy as np
@@ -105,7 +106,7 @@ class PlateDeduplicator:
         return True
 
 
-def _build_multipart_request(api_url: str, jpeg_bytes: bytes) -> Request:
+def _build_multipart_request(api_url: str, jpeg_bytes: bytes) -> dict[str, Any]:
     parsed_url = urlsplit(api_url)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
         raise ValueError("CAMERA_API_URL debe usar http o https y contener un host valido.")
@@ -121,25 +122,27 @@ def _build_multipart_request(api_url: str, jpeg_bytes: bytes) -> Request:
     }
     if settings.CAMERA_API_TOKEN:
         headers["Authorization"] = f"Bearer {settings.CAMERA_API_TOKEN}"
-    return Request(
-        api_url,
-        data=body,
-        method="POST",
-        headers=headers,
-    )
+    return {"url": api_url, "method": "POST", "headers": headers, "data": body}
 
 
 def post_jpeg(api_url: str, jpeg_bytes: bytes, timeout_seconds: float) -> dict[str, Any]:
     request = _build_multipart_request(api_url, jpeg_bytes)
     try:
-        # _build_multipart_request restringe el destino a HTTP(S) con host valido.
-        with urlopen(request, timeout=timeout_seconds) as response:  # nosec B310
-            payload = response.read()
-    except HTTPError as exc:
-        payload = exc.read()
+        with httpx.Client(follow_redirects=False, timeout=timeout_seconds) as client:
+            response = client.request(
+                request["method"], request["url"],
+                headers=request["headers"], content=request["data"],
+            )
+            response.raise_for_status()
+            payload = response.text
+    except httpx.HTTPStatusError as exc:
+        payload = exc.response.text if exc.response else ""
         if not payload:
-            raise RuntimeError(f"El endpoint de analisis respondio HTTP {exc.code}.") from exc
-    return json.loads(payload.decode("utf-8"))
+            status = exc.response.status_code if exc.response else 0
+            raise RuntimeError(f"El endpoint de analisis respondio HTTP {status}.") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"Fallo la conexion al endpoint de analisis: {exc}") from exc
+    return json.loads(payload)
 
 
 class CameraCaptureAgent:

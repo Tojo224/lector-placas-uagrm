@@ -23,11 +23,24 @@ apiClient.interceptors.request.use((config) => {
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error?.response?.status === 401) {
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error?.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
       clearSession();
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+      return Promise.reject(error);
     }
+
+    if (error?.response?.status >= 500 && originalRequest && !originalRequest._retry5xx) {
+      originalRequest._retry5xx = true;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return apiClient(originalRequest);
+    }
+
     return Promise.reject(error);
   }
 );

@@ -90,17 +90,26 @@ export function AuthProvider({ children }) {
   };
 
   const refreshProfile = async () => {
-    const profile = await getProfile();
-    persistUser(profile);
-    return profile;
+    try {
+      const profile = await getProfile();
+      persistUser(profile);
+      return profile;
+    } catch (error) {
+      setAuthError(error?.message || "No se pudo cargar el perfil");
+      throw error;
+    }
   };
 
   const saveProfile = async (payload) => {
     setProfileSaving(true);
+    setAuthError(null);
     try {
       const profile = await updateProfile(payload);
       persistUser(profile);
       return profile;
+    } catch (error) {
+      setAuthError(error?.message || "No se pudo guardar el perfil");
+      throw error;
     } finally {
       setProfileSaving(false);
     }
@@ -108,10 +117,14 @@ export function AuthProvider({ children }) {
 
   const removeProfile = async () => {
     setProfileSaving(true);
+    setAuthError(null);
     try {
       await deleteProfile();
       clearSession();
       setUser(null);
+    } catch (error) {
+      setAuthError(error?.message || "No se pudo eliminar el perfil");
+      throw error;
     } finally {
       setProfileSaving(false);
     }

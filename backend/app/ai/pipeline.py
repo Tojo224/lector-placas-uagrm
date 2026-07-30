@@ -137,20 +137,40 @@ def _encode_image(image: np.ndarray) -> str | None:
 
 def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offset: tuple[int, int], plate_engine: Any, realtime: bool) -> dict:
     _t0 = time.monotonic()
+    fallback_used = False
     try:
         predictions = plate_engine.predict(analysis_region)
     except Exception:
-        elapsed = time.monotonic() - _t0
-        logger.error("FastALPR/FastPlateOCR inference failed after %.3fs", elapsed, exc_info=True)
-        return {
-            "status": "DEGRADED",
-            "message": "El motor OCR primario falló durante la inferencia.",
-            "fallback_attempted": False,
-            "ocr_unavailable": True,
-            "detection_backend": PIPELINE_MODE,
-            "requires_manual_review": True,
-            "raw_bboxes": [],
-        }
+        if settings.OCR_FALLBACK_ENABLED:
+            logger.warning("FastALPR failed, attempting fallback with simplified preprocessing")
+            try:
+                gray = cv2.cvtColor(analysis_region, cv2.COLOR_BGR2GRAY) if analysis_region.ndim == 3 else analysis_region
+                predictions = plate_engine.predict(gray)
+                fallback_used = True
+            except Exception as fallback_err:
+                elapsed = time.monotonic() - _t0
+                logger.error("Fallback OCR also failed after %.3fs: %s", elapsed, fallback_err)
+                return {
+                    "status": "DEGRADED",
+                    "message": "El motor OCR primario y el fallback fallaron.",
+                    "fallback_attempted": True,
+                    "ocr_unavailable": True,
+                    "detection_backend": PIPELINE_MODE,
+                    "requires_manual_review": True,
+                    "raw_bboxes": [],
+                }
+        else:
+            elapsed = time.monotonic() - _t0
+            logger.error("FastALPR/FastPlateOCR inference failed after %.3fs", elapsed, exc_info=True)
+            return {
+                "status": "DEGRADED",
+                "message": "El motor OCR primario falló durante la inferencia.",
+                "fallback_attempted": False,
+                "ocr_unavailable": True,
+                "detection_backend": PIPELINE_MODE,
+                "requires_manual_review": True,
+                "raw_bboxes": [],
+            }
 
     raw_bboxes: list[list[float]] = []
     candidates: list[tuple[OCRCandidate, float]] = []
@@ -169,7 +189,7 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
             candidates.append((candidate, float(getattr(detection, "confidence", 0.0))))
 
     if not candidates:
-        return {"status": "LOW_CONFIDENCE", "message": "FastPlateOCR no encontro una placa legible en la imagen.", "detection_backend": PIPELINE_MODE, "requires_manual_review": True, "raw_bboxes": raw_bboxes}
+        return {"status": "LOW_CONFIDENCE", "message": "FastPlateOCR no encontro una placa legible en la imagen.", "fallback_attempted": fallback_used, "detection_backend": PIPELINE_MODE, "requires_manual_review": True, "raw_bboxes": raw_bboxes}
 
     candidates.sort(key=lambda item: (item[0].valid_format, item[0].score, item[0].confidence, item[1]), reverse=True)
     selected, detector_confidence = candidates[0]
@@ -181,6 +201,7 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
         "detected_plate": selected.raw_text,
         "normalized_plate": selected.normalized_text if confirmed else None,
         "is_valid_bolivian_format": selected.valid_format,
+        "fallback_attempted": fallback_used,
         "detection_backend": PIPELINE_MODE,
         "detection_confidence": detector_confidence,
         "ocr_confidence": selected.confidence,

@@ -1,16 +1,15 @@
 import apiClient from "./axios";
 
-function mapAuthError(error, fallbackMessage) {
+function toAuthError(error, fallbackMessage) {
   if (error?.response?.data?.detail) {
     const detail = error.response.data.detail;
     if (typeof detail === "string") {
-      throw new Error(detail);
+      return new Error(detail);
     } else if (Array.isArray(detail)) {
       const msg = detail.map((d) => {
         let field = d.loc ? d.loc[d.loc.length - 1] : "campo";
         let message = d.msg || "Valor inválido";
         
-        // Translate common field names
         const fieldTranslations = {
           nombre: "El nombre",
           apellido_paterno: "El apellido paterno",
@@ -21,7 +20,6 @@ function mapAuthError(error, fallbackMessage) {
         };
         const friendlyField = fieldTranslations[field] || field;
 
-        // Clean up and translate common Pydantic error messages
         if (message.startsWith("String should have at least")) {
           const match = message.match(/\d+/);
           const num = match ? match[0] : "8";
@@ -35,25 +33,25 @@ function mapAuthError(error, fallbackMessage) {
         }
         return `${friendlyField}: ${message}`;
       }).join(" ");
-      throw new Error(msg);
+      return new Error(msg);
     } else {
-      throw new Error(JSON.stringify(detail));
+      return new Error(JSON.stringify(detail));
     }
   }
 
   if (!error?.response) {
-    throw new Error("No se pudo conectar con el backend. Verifica que FastAPI este encendido en el puerto 8000 o 8010.");
+    return new Error("No se pudo conectar con el backend. Verifica que FastAPI este encendido en el puerto 8000 o 8010.");
   }
 
   if (error?.code === "ECONNABORTED") {
-    throw new Error("El servidor tardo demasiado en responder.");
+    return new Error("El servidor tardo demasiado en responder.");
   }
 
   if (error?.message === "Network Error") {
-    throw new Error("No se pudo conectar con el backend. Verifica que FastAPI este encendido.");
+    return new Error("No se pudo conectar con el backend. Verifica que FastAPI este encendido.");
   }
 
-  throw new Error(fallbackMessage);
+  return new Error(fallbackMessage);
 }
 
 function normalizeSession(data) {
@@ -69,7 +67,7 @@ export async function loginUser(credentials) {
     const { data } = await apiClient.post("/auth/login", credentials);
     return normalizeSession(data);
   } catch (error) {
-    mapAuthError(error, "No se pudo iniciar sesion.");
+    throw toAuthError(error, "No se pudo iniciar sesion.");
   }
 }
 
@@ -78,7 +76,7 @@ export async function registerUser(payload) {
     const { data } = await apiClient.post("/auth/register", payload);
     return normalizeSession(data);
   } catch (error) {
-    mapAuthError(error, "No se pudo completar el registro.");
+    throw toAuthError(error, "No se pudo completar el registro.");
   }
 }
 
@@ -87,7 +85,7 @@ export async function getProfile() {
     const { data } = await apiClient.get("/auth/me");
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo cargar el perfil.");
+    throw toAuthError(error, "No se pudo cargar el perfil.");
   }
 }
 
@@ -96,7 +94,7 @@ export async function updateProfile(payload) {
     const { data } = await apiClient.put("/auth/me", payload);
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo actualizar el perfil.");
+    throw toAuthError(error, "No se pudo actualizar el perfil.");
   }
 }
 
@@ -105,7 +103,7 @@ export async function deleteProfile() {
     await apiClient.delete("/auth/me");
     return true;
   } catch (error) {
-    mapAuthError(error, "No se pudo eliminar el perfil.");
+    throw toAuthError(error, "No se pudo eliminar el perfil.");
   }
 }
 
@@ -116,7 +114,7 @@ export async function uploadProfilePhoto(userId, file) {
     const { data } = await apiClient.post(`/v1/media/users/${userId}/photo`, form);
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo subir la foto de perfil.");
+    throw toAuthError(error, "No se pudo subir la foto de perfil.");
   }
 }
 
@@ -124,7 +122,7 @@ export async function deleteProfilePhoto(userId) {
   try {
     await apiClient.delete(`/v1/media/users/${userId}/photo`);
   } catch (error) {
-    mapAuthError(error, "No se pudo eliminar la foto de perfil.");
+    throw toAuthError(error, "No se pudo eliminar la foto de perfil.");
   }
 }
 
@@ -133,7 +131,7 @@ export async function getMediaUrl(mediaId) {
     const { data } = await apiClient.get(`/v1/media/${mediaId}/url`);
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo obtener la URL del archivo.");
+    throw toAuthError(error, "No se pudo obtener la URL del archivo.");
   }
 }
 
@@ -152,7 +150,7 @@ export async function listUsers() {
     const { data } = await apiClient.get("/auth/users");
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo cargar la lista de usuarios.");
+    throw toAuthError(error, "No se pudo cargar la lista de usuarios.");
   }
 }
 
@@ -161,7 +159,7 @@ export async function updateUserByAdmin(userId, payload) {
     const { data } = await apiClient.put(`/auth/users/${userId}`, payload);
     return data;
   } catch (error) {
-    mapAuthError(error, "No se pudo actualizar el usuario.");
+    throw toAuthError(error, "No se pudo actualizar el usuario.");
   }
 }
 
@@ -170,6 +168,6 @@ export async function deleteUserByAdmin(userId) {
     await apiClient.delete(`/auth/users/${userId}`);
     return true;
   } catch (error) {
-    mapAuthError(error, "No se pudo eliminar el usuario.");
+    throw toAuthError(error, "No se pudo eliminar el usuario.");
   }
 }
