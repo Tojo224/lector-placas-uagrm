@@ -167,6 +167,8 @@ class Dispositivo(Base):
     tipo_dispositivo_id = Column(Uuid, ForeignKey("tipos_dispositivo.id"), nullable=False)
     esta_activo = Column(Boolean, default=True, nullable=False)
     webhook_url = Column(String, nullable=True)  # URL del actuador de barrera (simulador o ESP32)
+    edge_credential_hash = Column(String, nullable=True)
+    edge_credential_issued_at = Column(DateTime(timezone=True), nullable=True)
     creado_el = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     actualizado_el = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 

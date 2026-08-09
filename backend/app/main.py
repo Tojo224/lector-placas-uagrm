@@ -38,6 +38,8 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.barrier import router as barrier_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.devices import router as devices_router
+from app.api.v1.edge_snapshot import router as edge_snapshot_router
+from app.api.v1.edge_sync import router as edge_sync_router
 from app.api.v1.media import router as media_router
 from app.api.v1.registration_requests import router as registration_requests_router
 from app.api.v1.vehicles import router as vehicles_router
@@ -208,6 +210,8 @@ app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["Dashboar
 app.include_router(plates.router, prefix="/api/v1/plates", tags=["Placas"])
 app.include_router(vehicles_router, prefix="/api/v1/vehicles", tags=["Vehicles"])
 app.include_router(devices_router, prefix="/api/v1/devices", tags=["Devices"])
+app.include_router(edge_snapshot_router, prefix="/api/v1/edge-snapshot", tags=["Edge Snapshot"])
+app.include_router(edge_sync_router, prefix="/api/v1/edge-sync", tags=["Edge Sync"])
 app.include_router(media_router, prefix="/api/v1/media", tags=["Media"])
 app.include_router(registration_requests_router, prefix="/api/v1/vehicle-registration-requests", tags=["Vehicle Registration Requests"])
 app.include_router(

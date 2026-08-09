@@ -1,5 +1,12 @@
 # Backlog
 
+- `EDGE-PHASE1-001` | `done` | Prioridad `alta` | Desacoplar de plates.py el analisis OCR/vehicular, decision de acceso y actuador de barrera sin cambiar contratos ni persistencia | Dependencias: ninguna
+- `EDGE-PHASE2-001` | `done` | Prioridad `alta` | Crear Edge Agent OCR local con API, configuracion independiente, modo offline y health sin SQLite ni sincronizacion | Dependencias: `EDGE-PHASE1-001`
+- `EDGE-PHASE3-001` | `done` | Prioridad `alta` | Agregar SQLite operativo, migraciones locales y repositorios durables al Edge Agent | Dependencias: `EDGE-PHASE2-001`
+- `EDGE-PHASE4-001` | `done` | Prioridad `alta` | Implementar cache local poblado y decision de acceso offline | Dependencias: `EDGE-PHASE3-001`
+- `EDGE-PHASE5-001` | `done` | Prioridad `critica` | Aprovisionamiento Edge, renovacion automatica de snapshot y SyncWorker Outbox idempotente | Dependencias: `EDGE-PHASE4-001`
+- `EDGE-PHASE6-001` | `pending` | Prioridad `alta` | Sincronizacion asincrona de media local y Cloudinary | Dependencias: `EDGE-PHASE5-001`
+
 - `AUDIT-ROTATE-001` | `pending` | Prioridad `critica` | Rotar todos los secretos presentes históricamente en Git y coordinar actualización de entornos | Dependencias: acceso Neon/Cloudinary
 - `AUDIT-MIG-001` | `done` | Prioridad `alta` | Aplicada `c2d3e4f5a6b7` en Neon; `alembic current/check` y conservación de 16 filas verificados | Dependencias: ninguna
 - `AUDIT-E2E-001` | `pending` | Prioridad `alta` | Ejecutar E2E real de roles, Cloudinary, cámara USB/RTSP/celular y barrera | Dependencias: hardware y servicios externos
@@ -134,3 +141,6 @@ superseded por los items siguientes. Se conservan debajo solo como historial.
 - `ROB-001` | `done` | Prioridad `media` | Reemplazar asyncio.gather sobre misma AsyncSession por awaits secuenciales | Dependencias: ninguna
 - `ROB-002` | `done` | Prioridad `media` | Corregir acumulación de streams de cámara en UploadPlate.jsx | Dependencias: ninguna
 - `ROB-003` | `done` | Prioridad `baja` | Documentar limitación de TTLCache in-process no distribuido | Dependencias: ninguna
+- `EDGE-PHASE-004` | `done` | Prioridad `critica` | Snapshot operativo, cache SQLite y decision local fail-closed con presencia/outbox atomicos | Dependencias: `EDGE-PHASE-003`
+- `EDGE-SCAN-POLICY-001` | `done` | Prioridad `alta` | Evitar persistir polling vacio o duplicado; conservar solo OCR/eventos relevantes | Dependencias: `EDGE-PHASE-003`
+- `EDGE-PHASE-005` | `done` | Prioridad `alta` | Implementar aprovisionamiento, renovacion de snapshot y procesamiento durable del outbox | Dependencias: `EDGE-PHASE-004`

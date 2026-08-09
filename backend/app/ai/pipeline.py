@@ -13,7 +13,6 @@ from app.ai.validators import (
     normalize_plate_text,
     validate_bolivian_plate,
 )
-from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,28 @@ class OCRCandidate:
     score: float
 
 
+@dataclass(frozen=True)
+class OCRPipelineConfig:
+    confidence_threshold: float = 0.55
+    roi_x: int | None = None
+    roi_y: int | None = None
+    roi_width: int | None = None
+    roi_height: int | None = None
+
+
+def default_pipeline_config() -> OCRPipelineConfig:
+    """Load central settings only for callers that do not inject OCR config."""
+    from app.config.settings import settings
+
+    return OCRPipelineConfig(
+        confidence_threshold=settings.OCR_CONFIDENCE_THRESHOLD,
+        roi_x=settings.OCR_ROI_X,
+        roi_y=settings.OCR_ROI_Y,
+        roi_width=settings.OCR_ROI_WIDTH,
+        roi_height=settings.OCR_ROI_HEIGHT,
+    )
+
+
 def _error(message: str, http_status: int = 422, error_code: str = "pipeline_error") -> dict:
     return {
         "status": "ERROR",
@@ -56,8 +77,8 @@ def get_pipeline_status() -> dict[str, object]:
     }
 
 
-def _configured_roi() -> tuple[int, int, int, int] | None:
-    values = (settings.OCR_ROI_X, settings.OCR_ROI_Y, settings.OCR_ROI_WIDTH, settings.OCR_ROI_HEIGHT)
+def _configured_roi(config: OCRPipelineConfig) -> tuple[int, int, int, int] | None:
+    values = (config.roi_x, config.roi_y, config.roi_width, config.roi_height)
     if all(value is None for value in values):
         return None
     if any(value is None for value in values):
@@ -68,8 +89,10 @@ def _configured_roi() -> tuple[int, int, int, int] | None:
     return x, y, width, height
 
 
-def _extract_analysis_region(image: np.ndarray) -> tuple[np.ndarray, tuple[int, int]]:
-    roi = _configured_roi()
+def _extract_analysis_region(
+    image: np.ndarray, config: OCRPipelineConfig
+) -> tuple[np.ndarray, tuple[int, int]]:
+    roi = _configured_roi(config)
     if roi is None:
         return image, (0, 0)
     x, y, width, height = roi
@@ -117,7 +140,14 @@ def _encode_image(image: np.ndarray) -> str | None:
     return f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}" if encoded else None
 
 
-def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offset: tuple[int, int], plate_engine: Any, realtime: bool) -> dict:
+def _analyze_with_fast_alpr(
+    image: np.ndarray,
+    analysis_region: np.ndarray,
+    offset: tuple[int, int],
+    plate_engine: Any,
+    realtime: bool,
+    config: OCRPipelineConfig,
+) -> dict:
     try:
         predictions = plate_engine.predict(analysis_region)
     except Exception:
@@ -145,7 +175,7 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
 
     candidates.sort(key=lambda item: (item[0].valid_format, item[0].score, item[0].confidence, item[1]), reverse=True)
     selected, detector_confidence = candidates[0]
-    confirmed = selected.valid_format and selected.confidence >= settings.OCR_CONFIDENCE_THRESHOLD
+    confirmed = selected.valid_format and selected.confidence >= config.confidence_threshold
     combined_confidence = float(np.clip(0.70 * selected.confidence + 0.30 * detector_confidence, 0.0, 1.0))
     result = {
         "status": "DETECTED" if confirmed else "LOW_CONFIDENCE",
@@ -172,7 +202,12 @@ def _analyze_with_fast_alpr(image: np.ndarray, analysis_region: np.ndarray, offs
     return result
 
 
-def analyze_plate(image_bytes: bytes, realtime: bool = False, plate_engine=None) -> dict:
+def analyze_plate(
+    image_bytes: bytes,
+    realtime: bool = False,
+    plate_engine=None,
+    config: OCRPipelineConfig | None = None,
+) -> dict:
     if not image_bytes:
         return _error("La imagen esta vacia.", 400, "empty_image")
     image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -180,8 +215,11 @@ def analyze_plate(image_bytes: bytes, realtime: bool = False, plate_engine=None)
         return _error("No se pudo decodificar la imagen enviada.", 400, "invalid_image")
     if plate_engine is None:
         return _error("Motor FastPlateOCR no inicializado.", 503, "ocr_unavailable")
+    config = config or default_pipeline_config()
     try:
-        analysis_region, offset = _extract_analysis_region(image)
+        analysis_region, offset = _extract_analysis_region(image, config)
     except ValueError as exc:
         return _error(str(exc), 422, "invalid_roi")
-    return _analyze_with_fast_alpr(image, analysis_region, offset, plate_engine, realtime)
+    return _analyze_with_fast_alpr(
+        image, analysis_region, offset, plate_engine, realtime, config
+    )

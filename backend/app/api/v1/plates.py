@@ -2,8 +2,9 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 
-from app.ai.pipeline import analyze_plate, get_pipeline_status
+from app.ai.pipeline import get_pipeline_status
 from app.api.v1.auth import require_scanner, require_staff
 from app.config.settings import settings
 from app.core.limiter import limiter
@@ -28,13 +29,14 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.schemas.plate import EscaneadoResponse, PlateAnalysisResponse
+from app.services.access_decision import infer_access_type, is_duplicate_access
+from app.services.barrier_actuator import trigger_barrier_webhook
 from app.services.cloudinary_storage import CloudinaryStorage
 from app.services.image_processing import ImageProcessingError, ImageProcessingService
 from app.services.media_tasks import process_media_record, spool_directory
+from app.services.plate_analysis import analyze_plate_bytes, inspect_vehicle
 from app.services.storage import StorageError
-from app.services.vehicle_color import HybridVehicleColorAnalyzer
-from app.services.vehicle_detection import VehicleAssociationService
-from app.services.vehicle_type import VehicleTypeResult, VehicleTypeSuggester
+from app.services.vehicle_type import VehicleTypeResult
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -60,34 +62,6 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png"]
 
 
-async def _trigger_barrier_webhook(url: str, direction: str) -> None:
-    """Dispara el webhook del actuador de barrera en background.
-    Nunca lanza excepcion: si la barrera esta offline, el flujo continua normal."""
-    from urllib.parse import urlsplit
-
-    import httpx
-
-    parsed = urlsplit(url)
-    if (
-        parsed.hostname in {"localhost", "127.0.0.1", "::1"}
-        and parsed.path.rstrip("/") == "/api/v1/barrier/trigger"
-    ):
-        from app.api.v1.barrier import enqueue_barrier_event
-
-        await enqueue_barrier_event(direction=direction)
-        return
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.post(
-                url,
-                json={"action": "open", "direction": direction},
-                follow_redirects=False,
-            )
-            response.raise_for_status()
-    except httpx.HTTPError:
-        pass  # Barrera offline no es error critico del sistema
-
-
 @router.post("/analyze", response_model=PlateAnalysisResponse)
 @limiter.limit("60/minute")
 async def analyze_plate_endpoint(
@@ -99,6 +73,7 @@ async def analyze_plate_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_scanner)
 ):
+    request_started_at = perf_counter()
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=400, 
@@ -120,11 +95,15 @@ async def analyze_plate_endpoint(
             detail="El motor OCR no está disponible en este momento."
         )
 
-    result_dict = await run_in_threadpool(
-        analyze_plate,
+    result_dict, ocr_elapsed_ms = await analyze_plate_bytes(
         image_bytes,
         realtime,
         plate_engine,
+    )
+    logger.info(
+        "Analisis de placa: etapa=ocr elapsed_ms=%.1f realtime=%s",
+        ocr_elapsed_ms,
+        realtime,
     )
 
     if result_dict.get("status") == "ERROR":
@@ -151,28 +130,24 @@ async def analyze_plate_endpoint(
     if not realtime and result_dict.get("plate_bbox"):
         vehicle_detector = getattr(request.app.state, "vehicle_detector", None)
         clip_classifier = getattr(request.app.state, "clip_color_classifier", None)
-        association = None
         if vehicle_detector is not None:
-            association = await run_in_threadpool(
-                VehicleAssociationService(vehicle_detector).detect_bytes,
-                image_bytes,
-                result_dict.get("plate_bbox"),
-            )
             type_catalog = list((await db.execute(
                 select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
             )).scalars().all())
-            type_result = VehicleTypeSuggester.resolve(association, type_catalog)
-            if type_result.tipo_sugerido_id is not None:
-                suggested_type_name = next(
-                    (item.nombre for item in type_catalog if item.id == type_result.tipo_sugerido_id),
-                    None,
-                )
-        if association is not None and clip_classifier is not None:
-            color_result = await run_in_threadpool(
-                HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
+            inspection = await inspect_vehicle(
                 image_bytes,
                 result_dict.get("plate_bbox"),
-                association,
+                vehicle_detector,
+                clip_classifier,
+                type_catalog,
+            )
+            color_result = inspection.color
+            type_result = inspection.vehicle_type
+            suggested_type_name = inspection.suggested_type_name
+            logger.info(
+                "Analisis de placa: etapa=vehiculo elapsed_ms=%.1f realtime=%s",
+                inspection.elapsed_ms,
+                realtime,
             )
     # El análisis anónimo devuelve solo el resultado OCR. Consultas de vehículos,
     # escaneos, accesos y evidencias requieren una identidad autenticada.
@@ -244,35 +219,37 @@ async def analyze_plate_endpoint(
             last_acceso_res = await db.execute(last_acceso_query)
             last_acceso = last_acceso_res.scalar_one_or_none()
 
-            cooldown = timedelta(seconds=settings.CAMERA_DUPLICATE_COOLDOWN_SECONDS)
             now_utc = datetime.now(timezone.utc)
-            is_duplicate = False
-            if last_acceso:
-                last_time = last_acceso.creado_el
-                if last_time.tzinfo is None:
-                    last_time = last_time.replace(tzinfo=timezone.utc)
-                if now_utc - last_time < cooldown:
-                    is_duplicate = True
-                    logger.info("Acceso duplicado para vehiculo %s omitido en el backend (cooldown)", vehicle.placa)
+            is_duplicate = is_duplicate_access(
+                last_acceso.creado_el if last_acceso else None,
+                now_utc,
+                settings.CAMERA_DUPLICATE_COOLDOWN_SECONDS,
+            )
+            if is_duplicate:
+                logger.info("Acceso duplicado para vehiculo %s omitido en el backend (cooldown)", vehicle.placa)
 
             if not is_duplicate:
                 # 1. Determinar el tipo de acceso (ENTRADA o SALIDA)
+                estado_campus = None
                 tipo_acceso = None
                 if dispositivo:
                     name_lower = dispositivo.nombre.lower()
-                    if "entrada" in name_lower or "ingreso" in name_lower:
-                        tipo_acceso = TipoAccesoEnum.ENTRADA
-                    elif "salida" in name_lower or "egreso" in name_lower:
-                        tipo_acceso = TipoAccesoEnum.SALIDA
+                    if any(
+                        token in name_lower
+                        for token in ("entrada", "ingreso", "salida", "egreso")
+                    ):
+                        tipo_acceso = TipoAccesoEnum(infer_access_type(name_lower, None))
                 
                 if tipo_acceso is None:
                     # Consultar el último estado en el campus del vehículo
                     estado_res = await db.execute(select(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle.id))
                     estado_campus = estado_res.scalars().first()
-                    if estado_campus and estado_campus.estado == UbicacionVehiculoEnum.DENTRO:
-                        tipo_acceso = TipoAccesoEnum.SALIDA
-                    else:
-                        tipo_acceso = TipoAccesoEnum.ENTRADA
+                    tipo_acceso = TipoAccesoEnum(
+                        infer_access_type(
+                            None,
+                            estado_campus.estado if estado_campus else None,
+                        )
+                    )
 
                 # 2. Registrar el acceso
                 ubicacion_acceso = dispositivo.ubicacion if dispositivo else "Portería Principal"
@@ -336,7 +313,7 @@ async def analyze_plate_endpoint(
                 # 6. Disparar webhook de barrera si el dispositivo tiene URL configurada
                 if dispositivo and dispositivo.webhook_url:
                     background_tasks.add_task(
-                        _trigger_barrier_webhook,
+                        trigger_barrier_webhook,
                         dispositivo.webhook_url,
                         tipo_acceso.value
                     )
@@ -389,7 +366,7 @@ async def analyze_plate_endpoint(
             )
 
     # Mapeo de la respuesta
-    return PlateAnalysisResponse(
+    response = PlateAnalysisResponse(
         estado="DETECTADO" if result_dict.get("status") == "DETECTED" else ("BAJA_CONFIANZA" if result_dict.get("status") == "LOW_CONFIDENCE" else result_dict.get("status")),
         placa_detectada=result_dict.get("detected_plate"),
         placa_normalizada=result_dict.get("normalized_plate"),
@@ -423,6 +400,13 @@ async def analyze_plate_endpoint(
         metodo_tipo=type_result.metodo_tipo if not realtime else None,
         mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message"))
     )
+    logger.info(
+        "Analisis de placa: etapa=total elapsed_ms=%.1f realtime=%s estado=%s",
+        (perf_counter() - request_started_at) * 1000,
+        realtime,
+        response.estado,
+    )
+    return response
 
 
 @router.get("/scans", response_model=list[EscaneadoResponse])

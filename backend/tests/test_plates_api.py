@@ -7,7 +7,6 @@ import numpy as np
 from app.api.v1 import plates
 from app.db.models import RoleEnum
 from app.schemas.plate import PlateAnalysisResponse
-from app.services.vehicle_detection import VehicleAssociation
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -102,7 +101,11 @@ class PlatesAPITests(unittest.TestCase):
         image = np.zeros((20, 40, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)
         self.assertTrue(ok)
-        with patch.object(plates, "analyze_plate", return_value=mock_pipeline_output):
+        with patch.object(
+            plates,
+            "analyze_plate_bytes",
+            AsyncMock(return_value=(mock_pipeline_output, 1.0)),
+        ):
             response = self.client.post(
                 "/api/v1/plates/analyze",
                 files={"file": ("plate.jpg", encoded.tobytes(), "image/jpeg")},
@@ -126,8 +129,7 @@ class PlatesAPITests(unittest.TestCase):
         }
         self.client.app.state.vehicle_detector = object()
         self.client.app.state.clip_color_classifier = object()
-        analyzer = MagicMock()
-        analyzer.analyze.return_value = SimpleNamespace(
+        color_result = SimpleNamespace(
             color_sugerido="AZUL",
             confianza_color=0.81,
             metodo_color="HIBRIDO",
@@ -135,15 +137,28 @@ class PlatesAPITests(unittest.TestCase):
         image = np.zeros((30, 50, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)
         self.assertTrue(ok)
-        association_service = MagicMock()
-        association_service.detect_bytes.return_value = VehicleAssociation(
-            "car", 0.91, (0, 0, 50, 30), 0.88, 0.75
+        inspection = SimpleNamespace(
+            color=color_result,
+            vehicle_type=SimpleNamespace(
+                tipo_sugerido_id=None,
+                confianza_tipo=0.0,
+                metodo_tipo="DESCONOCIDO",
+            ),
+            suggested_type_name=None,
+            elapsed_ms=2.0,
         )
 
         with (
-            patch.object(plates, "analyze_plate", return_value=pipeline_output),
-            patch.object(plates, "VehicleAssociationService", return_value=association_service),
-            patch.object(plates, "HybridVehicleColorAnalyzer", return_value=analyzer),
+            patch.object(
+                plates,
+                "analyze_plate_bytes",
+                AsyncMock(return_value=(pipeline_output, 1.0)),
+            ),
+            patch.object(
+                plates,
+                "inspect_vehicle",
+                AsyncMock(return_value=inspection),
+            ) as inspect_mock,
         ):
             response = self.client.post(
                 "/api/v1/plates/analyze",
@@ -154,7 +169,7 @@ class PlatesAPITests(unittest.TestCase):
         self.assertEqual(response.json()["color_sugerido"], "AZUL")
         self.assertEqual(response.json()["confianza_color"], 0.81)
         self.assertEqual(response.json()["metodo_color"], "HIBRIDO")
-        analyzer.analyze.assert_called_once()
+        inspect_mock.assert_awaited_once()
         self.db.commit.assert_awaited_once()
 
     def test_schema_accepts_ocr_supervision_backend(self):

@@ -1,5 +1,120 @@
 # MEMORY
 
+## 2026-08-09 - Edge Agent Fase 5
+
+- Aprovisionamiento: `POST /api/v1/edge-sync/devices/{id}/provision` requiere
+  administrador, rota la credencial y la devuelve una sola vez. El Edge usa
+  `EDGE_DEVICE_ID` y `EDGE_DEVICE_KEY`; ninguna se guarda en SQLite.
+- Autenticacion maquina-a-maquina: `X-Edge-Device-ID` + Bearer propio sobre HTTP
+  (TLS obligatorio en produccion). El backend valida dispositivo activo y hash.
+- El snapshot se descarga de `GET /api/v1/edge-sync/snapshot`, inicialmente al
+  arrancar y luego cada 900 s por defecto. Una respuesta fallida/invalida nunca
+  reemplaza el snapshot SQLite anterior.
+- `SyncWorker` corre fuera de requests OCR, reclama lotes de 25, recupera
+  IN_FLIGHT al inicio y conserva eventos hasta ACCEPTED/DUPLICATE. Retry usa
+  exponencial con jitter y timeout explicito; maximo predeterminado 10 intentos.
+- `POST /api/v1/edge-sync/events` devuelve estado por evento. Los UUID de scan o
+  access event se reutilizan como PK central, haciendo segura la retransmision
+  tras timeout. Un evento invalido termina en DEAD_LETTER y permanece auditable.
+- Se agrego la migracion central estrictamente necesaria `d3e4f5a6b7c8` para el
+  hash y fecha de emision de la credencial del dispositivo; existe una sola head.
+- No se crean vehiculos ni solicitudes desde eventos Edge desconocidos.
+
+## 2026-08-09 - Edge Agent Fase 4
+
+- El backend central publica `GET /api/v1/edge-snapshot` para administradores;
+  proyecta solo identidad/placa/activo/datos descriptivos del vehiculo y los
+  dispositivos operativos. No hubo migracion Alembic.
+- El Edge instala el snapshot mediante `POST /api/v1/edge/cache/snapshot` en una
+  transaccion SQLite. Conserva IDs locales y presencia para vehiculos retenidos,
+  elimina elementos ausentes y registra version/generacion/aplicacion.
+- La frescura usa `snapshot_generated_at` y `EDGE_CACHE_MAX_AGE_HOURS` (24 h por
+  defecto). Cache ausente, invalido o vencido nunca autoriza.
+- `OfflineAccessService` consulta solo SQLite. Para un vehiculo activo decide
+  ENTRADA/SALIDA con `infer_access_type`, y crea scan, access event, presence y
+  outbox atomicamente. Desconocidos e inactivos no crean vehiculos.
+- `EDGE_DUPLICATE_COOLDOWN_SECONDS` vale 30 s por defecto. Frames sin candidato y
+  duplicados se contabilizan en memoria, sin una fila por polling.
+- El outbox de esta fase es durable pero no se procesa ni contacta al backend.
+
+## 2026-08-09 - Fase 3 SQLite operativo del Edge Agent
+
+- Se agrego `edge_agent/db` usando exclusivamente `sqlite3`; no se introdujo un
+  ORM ni dependencia con SQLAlchemy/PostgreSQL.
+- La migracion local version 1 crea `cached_vehicles`, `cached_people`,
+  `cached_devices`, `vehicle_presence`, `edge_scans`, `edge_access_events`,
+  `local_media`, `outbox`, `sync_state`, `agent_metadata` y
+  `schema_migrations`.
+- SQLite usa WAL persistente, foreign keys por conexion, `busy_timeout=5000`,
+  synchronous NORMAL y transacciones `BEGIN IMMEDIATE` cortas.
+- La ruta se configura con `EDGE_DATA_DIR`. En Windows el default previsto es
+  `%ProgramData%/UAGRM/PlateAgent/data/edge-agent.sqlite3`; los tests usan rutas
+  temporales y no escriben junto al codigo.
+- Se implementaron repositorios concretos para cache de vehiculos, escaneos,
+  eventos de acceso, outbox, metadata de media y estado/metadata del agente.
+- Los IDs se generan localmente con UUID4. `local_media` solo acepta rutas
+  relativas y no almacena blobs. Outbox y metadata rechazan nombres de claves
+  sensibles (password/secret/token/JWT/credenciales/Cloudinary/API key).
+- El lifespan inicializa migraciones antes del OCR. Cada analisis edge persiste
+  un escaneo y el contador se restaura desde SQLite tras reiniciar.
+- Pruebas focalizadas: 23 correctas, incluidas creacion desde cero, migracion
+  triple idempotente, WAL, FK real, reapertura, outbox pendiente, rutas,
+  secretos y 160 escrituras con 8 workers sin `database is locked`.
+- Verificador final: 97 pass, 2 skip y build Vite correcto. Smoke central final
+  correcto con 34 rutas y puerto 8010 liberado. `git diff --check` correcto.
+- No se implemento sincronizacion, descarga de catalogos, decision offline,
+  Cloudinary, cambios Alembic/PostgreSQL, frontend ni empaquetado. No hubo push
+  ni merge.
+
+## 2026-08-09 - Fase 2 Edge Agent OCR local
+
+- Se creo `backend/edge_agent` como aplicacion FastAPI independiente del backend
+  central, con `/api/v1/edge/analyze`, `/health`, `/status` y `/version`.
+- El proceso no importa configuracion central, SQLAlchemy, psycopg, Alembic,
+  Cloudinary, routers administrativos ni bootstrap. Arranca sin `DATABASE_URL`.
+- `EdgeSettings` usa variables `EDGE_*`, host fijo `127.0.0.1` y puerto 8765 por
+  defecto. Un bind no-loopback se rechaza deliberadamente en esta fase.
+- `pipeline.py` conserva su comportamiento central mediante configuracion por
+  defecto diferida y permite inyectar `OCRPipelineConfig` al Edge Agent.
+- `plate_analysis.py` conserva el unico wrapper OCR y difiere imports de
+  color/tipo, eliminando dependencias de BD del camino edge.
+- FastALPR/FastPlateOCR se construye una vez en lifespan. Los modelos se buscan
+  solo localmente mediante `HF_HUB_OFFLINE=1` y `TRANSFORMERS_OFFLINE=1`.
+- La respuesta edge conserva los campos OCR consumidos por React; campos de
+  vehiculo, acceso, solicitud, color y tipo quedan en `None`/`False` porque esas
+  responsabilidades no pertenecen a Fase 2.
+- Pruebas focalizadas: 19 correctas. Cubren import sin DB/Cloudinary, contrato,
+  health listo/degradado, reinicio e imposibilidad de bind externo.
+- Motor real: ONNX CPU inicializado sin `DATABASE_URL` y en modo offline; cuadro
+  sintetico analizado como `LOW_CONFIDENCE`, resultado esperado.
+- Verificador: 90 pass, 2 skip, build Vite correcto. Smoke central correcto con
+  34 rutas y puerto 8010 liberado.
+- No se modificaron frontend, modelos, Alembic ni BD. No se hizo push ni merge.
+- Riesgo para empaquetado: los modelos estan actualmente en cache local; el
+  futuro instalador debe incluirlos y resolver sus rutas sin descarga inicial.
+
+## 2026-08-09 - Fase 1 de desacoplamiento para arquitectura edge
+
+- Se refactorizo `backend/app/api/v1/plates.py` sin cambiar endpoints, schemas,
+  reglas de negocio ni orden de persistencia.
+- `app.services.plate_analysis` encapsula el pipeline FastALPR/FastPlateOCR en
+  threadpool y la unica deteccion vehicular reutilizada por color y tipo.
+- `app.services.access_decision` contiene la decision pura de direccion y la
+  evaluacion de cooldown, incluida la compatibilidad con timestamps naive que
+  puede devolver PostgreSQL.
+- `app.services.barrier_actuator` contiene el webhook no bloqueante y conserva
+  el atajo local hacia el simulador SSE.
+- Se agregaron logs de latencia por OCR, inspeccion vehicular y tiempo total. No
+  se exponen nuevos campos HTTP ni datos sensibles.
+- No se modificaron FastALPR, FastPlateOCR, ONNX, frontend, dependencias,
+  modelos, PostgreSQL/Neon ni Alembic. No se hizo push ni merge.
+- Validacion focalizada: 49 pruebas correctas.
+- Verificador obligatorio: 85 pruebas correctas, 2 omitidas, build Vite OK.
+- Smoke obligatorio: health OK, pipeline `FAST_ALPR_FAST_PLATE_OCR`, OCR y
+  Supervision disponibles, 34 rutas OpenAPI y puerto 8010 liberado.
+- Riesgo pendiente: la persistencia, Cloudinary y solicitudes siguen dentro del
+  router central; se dejaron ahi intencionalmente para no adelantar fases.
+
 ## 2026-07-30 - Automatización de Migraciones y Bootstrap de Producción
 
 - Se eliminó el script de desarrollo `seed_db.py` que contenía datos de prueba ficticios.
