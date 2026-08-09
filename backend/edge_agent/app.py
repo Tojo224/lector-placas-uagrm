@@ -9,9 +9,12 @@ from time import perf_counter
 from typing import Any
 
 from app.ai.pipeline import get_pipeline_status
+from app.services.image_processing import ImageProcessingError
 from app.services.plate_analysis import analyze_plate_bytes
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from edge_agent import __version__
@@ -20,6 +23,7 @@ from edge_agent.config import EdgeSettings
 from edge_agent.db import EdgeDatabase
 from edge_agent.db.repositories import ScanRepository
 from edge_agent.engine import create_ocr_engine
+from edge_agent.media_spool import MediaSpool, MediaSpoolError
 from edge_agent.offline_access import OfflineAccessService
 from edge_agent.sync import SyncWorker
 
@@ -90,6 +94,8 @@ def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None)
         "decision": outcome.get("decision"),
         "motivo": outcome.get("reason"),
         "estado_offline": outcome.get("offline_state"),
+        "media_id": outcome.get("media_id"),
+        "media_estado": outcome.get("media_status"),
     }
 
 
@@ -125,6 +131,7 @@ def create_edge_app(
                 database, edge_settings.cache_max_age_hours,
                 edge_settings.duplicate_cooldown_seconds,
             )
+            app.state.media_spool = MediaSpool(database, edge_settings)
             app.state.analysis_count = await asyncio.to_thread(
                 app.state.scan_repository.count
             )
@@ -156,10 +163,29 @@ def create_edge_app(
         lifespan=lifespan,
     )
     app.state.edge_settings = edge_settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(edge_settings.ui_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept"],
+        allow_private_network=True,
+    )
+
+    @app.middleware("http")
+    async def private_network_and_cache_headers(request, call_next):
+        response = await call_next(request)
+        if request.headers.get("Access-Control-Request-Private-Network") == "true":
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+        if request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif request.url.path == "/" or not request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.post("/api/v1/edge/analyze")
     async def analyze(file: UploadFile = File(...), realtime: bool = False,
-                      device_id: str | None = Form(None)):
+                      confirm: bool = True, device_id: str | None = Form(None)):
         if file.content_type not in ALLOWED_CONTENT_TYPES:
             raise HTTPException(
                 status_code=400,
@@ -182,9 +208,23 @@ def create_edge_app(
             engine,
             edge_settings.pipeline_config(),
         )
-        outcome = await asyncio.to_thread(
-            app.state.offline_access.process, result, realtime, device_id
-        )
+        if confirm:
+            outcome = await asyncio.to_thread(
+                app.state.offline_access.process, result, realtime, device_id
+            )
+        else:
+            outcome = {"decision": "OCR_ONLY", "reason": "Lectura sin confirmar.",
+                       "offline_state": "LOCAL_OCR", "vehicle_found": False,
+                       "persisted": False}
+        try:
+            media_id = await asyncio.to_thread(
+                app.state.media_spool.capture, image_bytes, outcome
+            )
+            outcome["media_id"] = media_id
+            outcome["media_status"] = "PENDING" if media_id else None
+        except (ImageProcessingError, MediaSpoolError, OSError) as exc:
+            outcome["media_status"] = "FAILED_LOCAL"
+            logger.warning("No se pudo conservar evidencia local: %s", type(exc).__name__)
         if outcome["decision"] == "NO_RELEVANT_OCR":
             app.state.ignored_frame_count += 1
         elif outcome["decision"] == "DUPLICATE":
@@ -227,6 +267,8 @@ def create_edge_app(
                 {"network": "offline", "configured": False, "last_sync_success_at": None,
                  "next_sync_attempt_at": None, "sync_error": None,
                  "pending": 0, "retry": 0, "dead_letters": 0, "synced": 0})
+        media = (app.state.media_spool.stats() if database_ready else
+                 {"spool_bytes": 0, "disk_free_bytes": None, "low_space": True})
         return {
             "status": "ok" if ready else "degraded",
             "ready": ready,
@@ -235,6 +277,7 @@ def create_edge_app(
             "access_ready": ready and cache["valid"],
             "cache": cache,
             "sync": sync,
+            "media": media,
             "active_ocr_engine": "fast_alpr" if ocr_ready else "unavailable",
             **get_pipeline_status(),
         }
@@ -250,6 +293,8 @@ def create_edge_app(
                 {"network": "offline", "configured": False, "last_sync_success_at": None,
                  "next_sync_attempt_at": None, "sync_error": None,
                  "pending": 0, "retry": 0, "dead_letters": 0, "synced": 0})
+        media = (app.state.media_spool.stats() if database_ready else
+                 {"spool_bytes": 0, "disk_free_bytes": None, "low_space": True})
         return {
             "status": "running",
             "ready": ready,
@@ -264,6 +309,7 @@ def create_edge_app(
             "duplicate_frame_count": app.state.duplicate_frame_count,
             "cache": cache,
             "sync": sync,
+            "media": media,
             "last_analysis_at": (
                 app.state.last_analysis_at.isoformat()
                 if app.state.last_analysis_at
@@ -276,5 +322,22 @@ def create_edge_app(
     @app.get("/api/v1/edge/version")
     async def version():
         return {"name": "UAGRM Plate Edge Agent", "version": __version__}
+
+    frontend_dir = edge_settings.resolved_frontend_dir()
+    index_file = frontend_dir / "index.html"
+    assets_dir = frontend_dir / "assets"
+    if index_file.is_file():
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="edge-ui-assets")
+
+        @app.get("/", include_in_schema=False)
+        @app.get("/{frontend_path:path}", include_in_schema=False)
+        async def edge_frontend(frontend_path: str = ""):
+            if frontend_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Ruta no encontrada.")
+            candidate = (frontend_dir / frontend_path).resolve()
+            if frontend_dir in candidate.parents and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index_file)
 
     return app

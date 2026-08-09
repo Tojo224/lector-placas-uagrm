@@ -50,6 +50,15 @@ class EdgeSettings:
     sync_timeout_seconds: float = 10.0
     sync_batch_size: int = 25
     sync_max_attempts: int = 10
+    media_max_upload_bytes: int = 5 * 1024 * 1024
+    media_min_free_bytes: int = 100 * 1024 * 1024
+    frontend_dir: Path | None = None
+    ui_origins: tuple[str, ...] = (
+        "http://127.0.0.1:5173",
+        "https://127.0.0.1:5173",
+        "http://localhost:5173",
+        "https://localhost:5173",
+    )
 
     @classmethod
     def from_env(cls) -> EdgeSettings:
@@ -95,6 +104,21 @@ class EdgeSettings:
             sync_timeout_seconds=float(os.getenv("EDGE_SYNC_TIMEOUT_SECONDS", "10")),
             sync_batch_size=int(os.getenv("EDGE_SYNC_BATCH_SIZE", "25")),
             sync_max_attempts=int(os.getenv("EDGE_SYNC_MAX_ATTEMPTS", "10")),
+            media_max_upload_bytes=int(
+                os.getenv("EDGE_MEDIA_MAX_UPLOAD_BYTES", str(5 * 1024 * 1024))
+            ),
+            media_min_free_bytes=int(
+                os.getenv("EDGE_MEDIA_MIN_FREE_BYTES", str(100 * 1024 * 1024))
+            ),
+            frontend_dir=(Path(os.environ["EDGE_FRONTEND_DIR"]).expanduser().resolve()
+                          if os.getenv("EDGE_FRONTEND_DIR", "").strip() else None),
+            ui_origins=tuple(
+                origin.strip() for origin in os.getenv(
+                    "EDGE_UI_ORIGINS",
+                    "http://127.0.0.1:5173,https://127.0.0.1:5173,"
+                    "http://localhost:5173,https://localhost:5173",
+                ).split(",") if origin.strip()
+            ),
         )
 
     def sync_configured(self) -> bool:
@@ -105,6 +129,14 @@ class EdgeSettings:
 
     def database_path(self) -> Path:
         return self.resolved_data_dir() / "data" / "edge-agent.sqlite3"
+
+    def media_spool_dir(self) -> Path:
+        return self.resolved_data_dir() / "spool"
+
+    def resolved_frontend_dir(self) -> Path:
+        if self.frontend_dir:
+            return self.frontend_dir.expanduser().resolve()
+        return (Path(__file__).resolve().parents[2] / "frontend" / "dist").resolve()
 
     def pipeline_config(self) -> OCRPipelineConfig:
         return OCRPipelineConfig(

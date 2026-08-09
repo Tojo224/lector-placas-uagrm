@@ -21,6 +21,11 @@ export default defineConfig(({ mode }) => {
         "/uploads": {
           target: env.VITE_PROXY_TARGET || "http://127.0.0.1:8000",
           changeOrigin: true
+        },
+        "/edge-api": {
+          target: env.VITE_EDGE_PROXY_TARGET || "http://127.0.0.1:8765",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/edge-api/, "")
         }
       },
       hmr: {

@@ -1,8 +1,11 @@
 import io
 import unittest
-from unittest.mock import patch
 
-from app.services.image_processing import ImageProcessingError, ImageProcessingService
+from app.services.image_processing import (
+    ImageProcessingConfig,
+    ImageProcessingError,
+    ImageProcessingService,
+)
 from PIL import Image
 
 
@@ -35,10 +38,8 @@ class ImageProcessingTests(unittest.TestCase):
         self.assertEqual((result.width, result.height), (300, 200))
 
     def test_access_dimension_is_limited(self):
-        with patch(
-            "app.services.image_processing.settings.MEDIA_ACCESS_MAX_DIMENSION", 100
-        ):
-            result = self.service.process(encoded(size=(300, 150)), "ACCESS_EXIT")
+        service = ImageProcessingService(ImageProcessingConfig(access_max_dimension=100))
+        result = service.process(encoded(size=(300, 150)), "ACCESS_EXIT")
         self.assertEqual((result.width, result.height), (100, 50))
 
     def test_exif_is_removed_and_orientation_is_applied(self):
@@ -57,10 +58,9 @@ class ImageProcessingTests(unittest.TestCase):
             self.service.process(b"not-an-image", "ACCESS_ENTRY")
 
     def test_oversized_file_is_rejected_before_decode(self):
-        with patch(
-            "app.services.image_processing.settings.MEDIA_MAX_UPLOAD_BYTES", 4
-        ), self.assertRaises(ImageProcessingError):
-            self.service.process(b"12345", "ACCESS_ENTRY")
+        service = ImageProcessingService(ImageProcessingConfig(max_upload_bytes=4))
+        with self.assertRaises(ImageProcessingError):
+            service.process(b"12345", "ACCESS_ENTRY")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,6 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.config.settings import settings
-
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
 
@@ -23,11 +21,35 @@ class ProcessedImage:
     bytes: int
 
 
+@dataclass(frozen=True)
+class ImageProcessingConfig:
+    max_upload_bytes: int = 5 * 1024 * 1024
+    user_size: int = 512
+    vehicle_max_dimension: int = 1600
+    access_max_dimension: int = 1600
+    permanent_webp_quality: int = 82
+    access_webp_quality: int = 78
+
+
 class ImageProcessingService:
+    def __init__(self, config: ImageProcessingConfig | None = None) -> None:
+        if config is None:
+            from app.config.settings import settings
+
+            config = ImageProcessingConfig(
+                max_upload_bytes=settings.MEDIA_MAX_UPLOAD_BYTES,
+                user_size=settings.MEDIA_USER_SIZE,
+                vehicle_max_dimension=settings.MEDIA_VEHICLE_MAX_DIMENSION,
+                access_max_dimension=settings.MEDIA_ACCESS_MAX_DIMENSION,
+                permanent_webp_quality=settings.MEDIA_PERMANENT_WEBP_QUALITY,
+                access_webp_quality=settings.MEDIA_ACCESS_WEBP_QUALITY,
+            )
+        self.config = config
+
     def process(self, content: bytes, media_type: str) -> ProcessedImage:
         if not content:
             raise ImageProcessingError("La imagen esta vacia")
-        if len(content) > settings.MEDIA_MAX_UPLOAD_BYTES:
+        if len(content) > self.config.max_upload_bytes:
             raise ImageProcessingError("La imagen excede el tamano permitido")
 
         try:
@@ -38,15 +60,15 @@ class ImageProcessingService:
                 image = ImageOps.exif_transpose(source)
                 if media_type == "USER_PROFILE":
                     image = self._user_image(image)
-                    quality = settings.MEDIA_PERMANENT_WEBP_QUALITY
+                    quality = self.config.permanent_webp_quality
                 elif media_type == "VEHICLE_REGISTRATION":
                     image = self._limited(
-                        image, settings.MEDIA_VEHICLE_MAX_DIMENSION
+                        image, self.config.vehicle_max_dimension
                     )
-                    quality = settings.MEDIA_PERMANENT_WEBP_QUALITY
+                    quality = self.config.permanent_webp_quality
                 elif media_type in {"ACCESS_ENTRY", "ACCESS_EXIT"}:
-                    image = self._limited(image, settings.MEDIA_ACCESS_MAX_DIMENSION)
-                    quality = settings.MEDIA_ACCESS_WEBP_QUALITY
+                    image = self._limited(image, self.config.access_max_dimension)
+                    quality = self.config.access_webp_quality
                 else:
                     raise ImageProcessingError("Tipo multimedia no soportado")
 
@@ -88,13 +110,12 @@ class ImageProcessingService:
         copy.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
         return copy
 
-    @staticmethod
-    def _user_image(image: Image.Image) -> Image.Image:
+    def _user_image(self, image: Image.Image) -> Image.Image:
         side = min(image.size)
         left = (image.width - side) // 2
         top = (image.height - side) // 2
         cropped = image.crop((left, top, left + side, top + side))
         return cropped.resize(
-            (settings.MEDIA_USER_SIZE, settings.MEDIA_USER_SIZE),
+            (self.config.user_size, self.config.user_size),
             Image.Resampling.LANCZOS,
         )

@@ -1,5 +1,40 @@
 # HEARTBEAT
 
+## Estado vigente - 2026-08-09 - Edge Agent Fase 7
+
+- **Foco**: scanner React local-first servido por Edge, sin fallback OCR central.
+- **Completado**:
+  - Clientes separados `centralApiClient` y `edgeApiClient`; UploadPlate usa solo
+    Edge para OCR, decision, health, status y version.
+  - Polling realtime usa `confirm=false`; el consenso envia una unica evidencia
+    confirmada para ejecutar decision/persistencia local, conservando tracking.
+  - Edge sirve `frontend/dist`, assets versionados y fallback de React Router en
+    `http://127.0.0.1:8765`; la ruta local no requiere sesion humana central.
+  - Panel compacto muestra OCR, red/sync, cache, snapshot, pendientes, media,
+    dead letters, disco y version; Edge caido se informa sin fallback.
+  - CORS explicito, PNA permitido para desarrollo y proxy Vite `/edge-api`; el
+    despliegue local usa mismo origen y evita mixed-content.
+- **Validado**: 32 pruebas focalizadas; 128 pass/2 skip en suite/verificador;
+  build Vite, smoke central y `git diff --check` correctos.
+- **Limite vigente**: no hay EXE, instalador, Windows Service ni auto-update.
+
+## Estado vigente - 2026-08-09 - Edge Agent Fase 6
+
+- **Foco**: evidencia WebP durable en disco y sincronizacion asincrona mediante
+  backend central, sin credenciales Cloudinary en Edge.
+- **Completado**:
+  - Escritura atomica temp+rename bajo el spool del directorio Edge, con SHA-256,
+    limite de tamano, rutas relativas y metadata `local_media`.
+  - Migracion SQLite local 2 agrega intentos/retry/error; media y su outbox
+    MEDIA_READY se crean consistentemente y sobreviven reinicios.
+  - SyncWorker valida archivo/checksum, recupera IN_FLIGHT y envia multipart. El
+    backend reprocesa, valida y sube a Cloudinary con public_id determinista.
+  - Status/health informan uso del spool, espacio libre, low-space y conteos.
+- **Validado**: 46 pruebas focalizadas; 123 pass/2 skip en verificador completo;
+  build Vite, smoke central y `git diff --check` correctos.
+- **Limite vigente**: archivos SYNCED se conservan; no hay politica de limpieza,
+  frontend completo, empaquetado ni auto-update.
+
 ## Estado vigente - 2026-08-09 - Edge Agent Fase 5
 
 - **Foco**: aprovisionamiento de identidad, renovacion de snapshot y Outbox

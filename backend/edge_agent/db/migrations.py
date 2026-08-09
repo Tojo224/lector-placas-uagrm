@@ -138,4 +138,15 @@ MIGRATIONS = (
             """,
         ),
     ),
+    Migration(
+        version=2,
+        name="durable_media_sync_state",
+        statements=(
+            "ALTER TABLE local_media ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE local_media ADD COLUMN next_attempt_at TEXT",
+            "ALTER TABLE local_media ADD COLUMN last_error TEXT",
+            "ALTER TABLE local_media ADD COLUMN updated_at TEXT",
+            "CREATE INDEX IF NOT EXISTS ix_local_media_sync ON local_media(status, next_attempt_at, created_at)",
+        ),
+    ),
 )

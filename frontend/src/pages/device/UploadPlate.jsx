@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import UploadImage from "../../components/UploadImage";
-import {
-  createVehicle,
-  lookupVehicleByPlate,
-  uploadPlateImage,
-  createAccessLog,
-  createAutoAccessLog,
-  createAutoAccessWithEvidence,
-  getBrands,
-  getVehicleTypes
-} from "../../api/plates";
+import { analyzeWithEdge, getEdgeHealth, getEdgeStatus, getEdgeVersion } from "../../api/edge";
 import { useAuth } from "../../hooks/useAuth";
 import { formatPlate } from "../../utils/formatters";
 import VehicleFoundModal from "../../components/UploadPlate/VehicleFoundModal";
@@ -34,6 +25,10 @@ const vehicleInitialState = {
   vehicle_type: "CAR",
   year: "",
   observation: ""
+};
+
+const unsupportedCentralOperation = async () => {
+  throw new Error("Esta operación administrativa no está disponible en el scanner Edge local.");
 };
 
 function UploadPlate() {
@@ -80,11 +75,37 @@ function UploadPlate() {
   const [scanError, setScanError] = useState("");
   const [activeTab, setActiveTab] = useState(user?.rol === "DISPOSITIVO" ? "camera" : null); // null | "image" | "camera"
   const [activeModal, setActiveModal] = useState(null); // null | "file" | "snapshot"
+  const [edgeState, setEdgeState] = useState({ connected: false, health: null, status: null, version: null });
+  const [decisionReason, setDecisionReason] = useState("");
   const activeModalRef = useRef(null);
+  const edgeConnectedRef = useRef(false);
 
   useEffect(() => {
     activeModalRef.current = activeModal;
   }, [activeModal]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshEdgeState = async () => {
+      const [health, status, version] = await Promise.allSettled([
+        getEdgeHealth(), getEdgeStatus(), getEdgeVersion()
+      ]);
+      if (!active) return;
+      setEdgeState({
+        connected: health.status === "fulfilled" && status.status === "fulfilled",
+        health: health.status === "fulfilled" ? health.value : null,
+        status: status.status === "fulfilled" ? status.value : null,
+        version: version.status === "fulfilled" ? version.value : null
+      });
+    };
+    refreshEdgeState();
+    const timer = setInterval(refreshEdgeState, 5000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    edgeConnectedRef.current = edgeState.connected;
+  }, [edgeState.connected]);
 
   useEffect(() => {
     if (!navigator.mediaDevices?.addEventListener) return undefined;
@@ -140,6 +161,45 @@ function UploadPlate() {
     resetLookupState();
     setLookupLoading(true);
 
+    if (!analysisResult) {
+      setLookupError("La decisión offline requiere una imagen analizada por el Edge Agent.");
+      setLookupLoading(false);
+      return;
+    }
+    setDecisionReason(analysisResult.motivo || "");
+    if (analysisResult.decision === "DUPLICATE") {
+      setLookupLoading(false);
+      return;
+    }
+    if (analysisResult.decision === "ALLOW" && analysisResult.es_registrado) {
+      const result = {
+        id: analysisResult.vehiculo_id,
+        license_plate: analysisResult.placa_normalizada || plateValue,
+        propietario: { nombre: analysisResult.propietario_nombre || "Propietario" }
+      };
+      setLookupResult(result);
+      setAutoAccessLog({
+        id: analysisResult.acceso_id,
+        direction: analysisResult.tipo_acceso === "ENTRADA" ? "ENTRY" : "EXIT",
+        zone: "Portería Principal",
+        timestamp: new Date().toISOString(),
+        vehiculo_id: analysisResult.vehiculo_id,
+        media_status: analysisResult.media_estado
+      });
+      setActiveModal("access_confirmed");
+      setTimeout(() => {
+        setActiveModal(null);
+        setLookupResult(null);
+        setAutoAccessLog(null);
+        setManualPlate("");
+      }, 5000);
+    } else {
+      setManualPlate(plateValue);
+      setActiveModal("plate_not_found");
+    }
+    setLookupLoading(false);
+    return;
+
     // Si el backend ya registró el acceso durante el análisis, no necesitamos
     // crear otro acceso — solo buscar los datos del vehículo para la UI.
     const backendAlreadyRegistered = Boolean(analysisResult?.acceso_id);
@@ -163,7 +223,7 @@ function UploadPlate() {
           }
         };
       } else {
-        result = await lookupVehicleByPlate(plateValue);
+        result = await unsupportedCentralOperation(plateValue);
       }
       setLookupResult(result);
       
@@ -206,12 +266,12 @@ function UploadPlate() {
         // Flujo manual o de imagen estática → registrar acceso ahora
         try {
           const autoResult = evidence
-            ? await createAutoAccessWithEvidence({
+            ? await unsupportedCentralOperation({
                 vehicle_id: result.id,
                 zone: accessZone,
                 notes: ""
               }, evidence)
-            : await createAutoAccessLog({
+            : await unsupportedCentralOperation({
             vehicle_id: result.id,
             zone: accessZone,
             notes: ""
@@ -264,7 +324,7 @@ function UploadPlate() {
           try {
             const form = new FormData();
             form.append("file", evidence, "unknown-vehicle.jpg");
-            analysisResult = await uploadPlateImage(form);
+            analysisResult = await analyzeWithEdge(form);
           } catch (requestError) {
             setLookupError(requestError?.response?.data?.detail || "No se pudo enviar la solicitud de revisión.");
             return;
@@ -290,8 +350,7 @@ function UploadPlate() {
 
   const handleLookup = async (event) => {
     event.preventDefault();
-    const normalizedPlate = formatPlate(manualPlate);
-    await handleLookupPlate(normalizedPlate);
+    setLookupError("La decisión offline requiere una imagen analizada por el Edge Agent.");
   };
 
   const handleImageSelected = async (event) => {
@@ -313,7 +372,7 @@ function UploadPlate() {
     try {
       setLookupLoading(true);
       resetLookupState();
-      const analysis = await uploadPlateImage(formData);
+      const analysis = await analyzeWithEdge(formData);
       setAnalysisPreview(analysis);
 
       if (analysis?.placa_normalizada) {
@@ -345,6 +404,11 @@ function UploadPlate() {
 
   const detectFrame = async () => {
     if (!videoRef.current || !canvasRef.current || !streamRef.current) return;
+    if (!edgeConnectedRef.current) {
+      setScanError("Edge Agent desconectado. No se enviarán frames al backend central.");
+      detectionTimerRef.current = setTimeout(detectFrame, 2000);
+      return;
+    }
 
     // Si hay un modal activo en pantalla, pausar el análisis OCR para no saturar la CPU,
     // pero mantener la cámara encendida.
@@ -400,7 +464,7 @@ function UploadPlate() {
       if (blob) {
         const formData = new FormData();
         formData.append("file", blob, "frame.jpg");
-        const analysis = await uploadPlateImage(formData, true, controller.signal);
+        const analysis = await analyzeWithEdge(formData, true, controller.signal, false);
 
         const normalizedText = analysis.placa_normalizada
           ? analysis.placa_normalizada
@@ -465,7 +529,11 @@ function UploadPlate() {
             setTrackingBoxes([]);
             setAnalysisPreview(analysis);
             setManualPlate(normalizedText);
-            handleLookupPlate(normalizedText, evidenceBlob || blob, analysis);
+            const confirmedForm = new FormData();
+            confirmedForm.append("file", evidenceBlob || blob, "evidence.jpg");
+            const confirmed = await analyzeWithEdge(confirmedForm, false, controller.signal, true);
+            setAnalysisPreview(confirmed);
+            handleLookupPlate(normalizedText, evidenceBlob || blob, confirmed);
             return;
           }
 
@@ -621,11 +689,11 @@ function UploadPlate() {
 
     try {
       setLookupLoading(true);
-      const analysis = await uploadPlateImage(formData);
+      const analysis = await analyzeWithEdge(formData);
       setAnalysisPreview(analysis);
       if (analysis?.placa_normalizada) {
         setManualPlate(analysis.placa_normalizada);
-        await handleLookupPlate(analysis.placa_normalizada);
+        await handleLookupPlate(analysis.placa_normalizada, blob, analysis);
       } else {
         setLookupError(analysis?.mensaje || "No se pudo detectar una placa desde la camara.");
       }
@@ -639,6 +707,8 @@ function UploadPlate() {
 
   const handleVehicleSubmit = async (event) => {
     event.preventDefault();
+    setRegisterError("El registro de vehículos pertenece al backend central y no está disponible en el scanner local.");
+    return;
     setRegisterError("");
     setRegisterSuccess("");
 
@@ -650,7 +720,7 @@ function UploadPlate() {
         owner: ownerForm
       };
 
-      const createdVehicle = await createVehicle(payload);
+      const createdVehicle = await unsupportedCentralOperation(payload);
       setLookupResult(createdVehicle);
       setRegisterSuccess("Vehiculo registrado correctamente.");
       setVehicleForm(vehicleInitialState);
@@ -668,11 +738,13 @@ function UploadPlate() {
   };
 
   const handleRegisterAccess = async (direction) => {
+    setAccessError("La dirección y la decisión ya fueron determinadas por el Edge Agent.");
+    return;
     if (!lookupResult?.id) return;
     try {
       setRegisteringAccess(true);
       setAccessError("");
-      const log = await createAutoAccessLog({
+      const log = await unsupportedCentralOperation({
         vehicle_id: lookupResult.id,
         direction: direction,
         zone: accessZone,
@@ -702,6 +774,44 @@ function UploadPlate() {
 
   return (
     <section className="page-stack">
+      <div className="card" data-testid="edge-operational-status" style={{ padding: "0.9rem 1.1rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+          <div>
+            <strong style={{ color: edgeState.connected ? "#15803d" : "#b91c1c" }}>
+              {edgeState.connected ? "Edge Agent conectado" : "Edge Agent desconectado"}
+            </strong>
+            <span className="muted-text" style={{ marginLeft: "0.75rem" }}>
+              OCR {edgeState.health?.ocr_ready ? "listo" : "no listo"}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+            <span>{edgeState.status?.sync?.network === "online" ? "ONLINE" : "OFFLINE"}</span>
+            <span>Caché: {edgeState.status?.cache?.state || "desconocido"}</span>
+            <span>Versión: {edgeState.version?.version || "—"}</span>
+          </div>
+        </div>
+        {!edgeState.connected && (
+          <p className="error-text" style={{ margin: "0.6rem 0 0" }}>
+            El scanner local no está disponible. No existe fallback hacia Railway o Neon.
+          </p>
+        )}
+        {edgeState.connected && edgeState.status?.sync?.network !== "online" && (
+          <p className="muted-text" style={{ margin: "0.6rem 0 0" }}>
+            Operación local disponible; la sincronización continuará cuando vuelva Internet.
+          </p>
+        )}
+        <details style={{ marginTop: "0.6rem" }}>
+          <summary>Detalles operativos</summary>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.35rem 1rem", marginTop: "0.5rem" }}>
+            <span>Edad snapshot: {edgeState.status?.cache?.age_hours ?? "—"} h</span>
+            <span>Eventos pendientes: {edgeState.status?.sync?.pending ?? 0}</span>
+            <span>Eventos retry: {edgeState.status?.sync?.retry ?? 0}</span>
+            <span>Dead letters: {edgeState.status?.sync?.dead_letters ?? 0}</span>
+            <span>Evidencias pendientes: {(edgeState.status?.media?.pending ?? 0) + (edgeState.status?.media?.retry ?? 0)}</span>
+            <span>Poco espacio: {edgeState.status?.media?.low_space ? "Sí" : "No"}</span>
+          </div>
+        </details>
+      </div>
       {activeTab === null && (
         <div style={{
           display: "flex",
@@ -1112,6 +1222,7 @@ function UploadPlate() {
           setManualPlate={setManualPlate}
           activeTab={activeTab}
           startCamera={startCamera}
+          reason={decisionReason}
         />
       )}
       {activeModal === "plate_request_sent" && (
@@ -1164,6 +1275,9 @@ function UploadPlate() {
               <p style={{ color: "#6b7280", margin: "0.25rem 0 0", fontSize: "1.1rem" }}>
                 {new Date(autoAccessLog.timestamp).toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </p>
+              {autoAccessLog.media_status === "PENDING" && (
+                <p className="muted-text" style={{ marginTop: "0.75rem" }}>Evidencia guardada localmente, pendiente de sincronización.</p>
+              )}
               <p className="muted-text" style={{ marginTop: "1.5rem", fontSize: "0.85rem" }}>Volviendo a analizar en 5 segundos...</p>
             </div>
           </div>

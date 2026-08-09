@@ -14,6 +14,7 @@ import AccessLogs from "../pages/operator/AccessLogs";
 import VehicleRegistrationRequests from "../pages/VehicleRegistrationRequests";
 import Loader from "../components/Loader";
 import { useAuth } from "../hooks/useAuth";
+import { isEdgeHosted } from "../api/edge";
 
 function VehiclesRoute() {
   const { user, authLoading } = useAuth();
@@ -105,6 +106,15 @@ function HomeRoute() {
 }
 
 function AppRoutes() {
+  if (isEdgeHosted) {
+    return (
+      <Routes>
+        <Route path="/" element={<UploadPlate />} />
+        <Route path="/subir-placa" element={<UploadPlate />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
   return (
     <Routes>
       <Route path="/login" element={<Login />} />

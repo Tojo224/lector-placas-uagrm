@@ -49,7 +49,9 @@ class CloudinaryStorage(StorageService):
             secure=settings.CLOUDINARY_SECURE,
         )
 
-    def upload(self, content: bytes, media_type: str) -> StorageUploadResult:
+    def upload(
+        self, content: bytes, media_type: str, public_id: str | None = None
+    ) -> StorageUploadResult:
         if media_type not in FOLDERS:
             raise StorageError("Tipo multimedia no soportado")
         try:
@@ -58,12 +60,12 @@ class CloudinaryStorage(StorageService):
 
             result = cloudinary.uploader.upload(
                 io.BytesIO(content),
-                public_id=str(uuid4()),
+                public_id=public_id or str(uuid4()),
                 asset_folder=f"{settings.CLOUDINARY_ASSET_PREFIX}/{FOLDERS[media_type]}",
                 resource_type="image",
                 type=settings.CLOUDINARY_DELIVERY_TYPE,
                 format="webp",
-                overwrite=False,
+                overwrite=public_id is not None,
             )
             return StorageUploadResult(
                 asset_id=result["asset_id"],

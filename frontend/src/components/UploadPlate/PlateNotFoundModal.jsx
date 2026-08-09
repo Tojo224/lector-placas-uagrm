@@ -6,7 +6,8 @@ export default function PlateNotFoundModal({
   setManualPlate,
   activeTab,
   startCamera,
-  requestSent = false
+  requestSent = false,
+  reason = ""
 }) {
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -38,6 +39,7 @@ export default function PlateNotFoundModal({
               {manualPlate}
             </p>
           )}
+          {reason && <p className="muted-text" style={{ marginTop: "0.75rem" }}>{reason}</p>}
         </div>
       </div>
     </div>

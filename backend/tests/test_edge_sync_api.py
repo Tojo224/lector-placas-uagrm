@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
+from io import BytesIO
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from app.api.v1.edge_sync import EdgeEvent, _ingest_event, provision_device
+from app.api.v1.edge_sync import (
+    EdgeEvent,
+    _ingest_event,
+    ingest_media,
+    provision_device,
+)
 from app.core.security import verify_password
-from app.db.models import Dispositivo, Escaneado
+from app.db.models import Acceso, Dispositivo, Escaneado, MediaTypeEnum, TipoAccesoEnum
+from PIL import Image
+from starlette.datastructures import Headers, UploadFile
 
 
 class MemorySession:
@@ -20,6 +30,9 @@ class MemorySession:
         self.rows[(type(value), value.id)] = value
 
     async def commit(self):
+        return None
+
+    async def rollback(self):
         return None
 
 
@@ -58,3 +71,43 @@ async def test_unknown_event_schema_is_permanent_error():
     event = EdgeEvent(event_id=uuid4(), event_type="SCAN_RECORDED",
                       schema_version=99, payload={})
     assert await _ingest_event(session, device, event) == "PERMANENT_ERROR"
+
+
+@pytest.mark.anyio
+async def test_central_media_upload_is_idempotent(monkeypatch):
+    session = MemorySession()
+    scan_id, access_id, media_id = uuid4(), uuid4(), uuid4()
+    scan = Escaneado(id=scan_id, estado="DETECTADO", creado_el=datetime.now(timezone.utc))
+    access = Acceso(id=access_id, tipo_acceso=TipoAccesoEnum.ENTRADA,
+                    ubicacion="Campus", escaneado_id=scan_id)
+    session.rows[(Escaneado, scan_id)] = scan
+    session.rows[(Acceso, access_id)] = access
+    output = BytesIO()
+    Image.new("RGB", (20, 10), "navy").save(output, format="WEBP")
+    content = output.getvalue()
+    uploads = []
+
+    class Storage:
+        def upload(self, data, media_type, public_id):
+            uploads.append((data, media_type, public_id))
+            return SimpleNamespace(asset_id="asset", public_id=public_id,
+                resource_type="image", delivery_type="authenticated", format="webp",
+                width=20, height=10, bytes=len(data))
+
+    monkeypatch.setattr("app.api.v1.edge_sync.CloudinaryStorage", Storage)
+
+    def upload_file():
+        return UploadFile(BytesIO(content), filename="evidence.webp",
+                          headers=Headers({"content-type": "image/webp"}))
+
+    kwargs = {"media_id": media_id, "media_type": MediaTypeEnum.ACCESS_ENTRY,
+              "checksum_sha256": hashlib.sha256(content).hexdigest(),
+              "size_bytes": len(content), "schema_version": 1,
+              "scan_id": scan_id, "access_event_id": access_id,
+              "db": session, "_device": None}
+    first = await ingest_media(file=upload_file(), **kwargs)
+    second = await ingest_media(file=upload_file(), **kwargs)
+    assert first["status"] == "ACCEPTED"
+    assert second["status"] == "DUPLICATE"
+    assert len(uploads) == 1
+    assert uploads[0][2] == f"edge-{media_id}"

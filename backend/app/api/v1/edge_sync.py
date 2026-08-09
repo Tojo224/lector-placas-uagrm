@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -9,15 +11,22 @@ from app.api.v1.auth import require_admin
 from app.core.security import hash_password, verify_password
 from app.db.models import (
     Acceso,
+    ArchivoMultimedia,
     Dispositivo,
     Escaneado,
     EstadoEscaneoEnum,
+    MediaProviderEnum,
+    MediaStatusEnum,
+    MediaTypeEnum,
     TipoAccesoEnum,
     Usuario,
     Vehiculo,
 )
 from app.db.session import get_db
-from fastapi import APIRouter, Depends, Header, HTTPException
+from app.services.cloudinary_storage import CloudinaryStorage
+from app.services.image_processing import ImageProcessingError, ImageProcessingService
+from app.services.storage import StorageError
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -175,3 +184,69 @@ async def ingest_events(
             status = "RETRYABLE_ERROR"
         results.append({"event_id": str(event.event_id), "status": status})
     return {"results": results}
+
+
+@router.post("/media/{media_id}")
+async def ingest_media(
+    media_id: UUID,
+    file: UploadFile = File(...),
+    media_type: MediaTypeEnum = Form(...),
+    checksum_sha256: str = Form(...),
+    size_bytes: int = Form(...),
+    schema_version: int = Form(...),
+    scan_id: UUID | None = Form(None),
+    access_event_id: UUID | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    _device: Dispositivo = Depends(require_edge_device),
+):
+    existing = await db.get(ArchivoMultimedia, media_id)
+    if existing and existing.estado == MediaStatusEnum.READY:
+        return {"media_id": str(media_id), "status": "DUPLICATE"}
+    if schema_version != 1 or media_type not in {
+        MediaTypeEnum.ACCESS_ENTRY, MediaTypeEnum.ACCESS_EXIT
+    }:
+        return {"media_id": str(media_id), "status": "PERMANENT_ERROR"}
+    if file.content_type != "image/webp" or size_bytes < 1 or size_bytes > 5 * 1024 * 1024:
+        return {"media_id": str(media_id), "status": "PERMANENT_ERROR"}
+    content = await file.read(5 * 1024 * 1024 + 1)
+    if len(content) != size_bytes or hashlib.sha256(content).hexdigest() != checksum_sha256:
+        return {"media_id": str(media_id), "status": "PERMANENT_ERROR"}
+    access = await db.get(Acceso, access_event_id) if access_event_id else None
+    scan = await db.get(Escaneado, scan_id) if scan_id else None
+    if not access or not scan or access.escaneado_id != scan.id:
+        return {"media_id": str(media_id), "status": "RETRYABLE_ERROR"}
+    try:
+        processed = await asyncio.to_thread(
+            ImageProcessingService().process, content, media_type.value
+        )
+        uploaded = await asyncio.to_thread(
+            CloudinaryStorage().upload, processed.content, media_type.value,
+            f"edge-{media_id}",
+        )
+    except ImageProcessingError:
+        return {"media_id": str(media_id), "status": "PERMANENT_ERROR"}
+    except StorageError:
+        return {"media_id": str(media_id), "status": "RETRYABLE_ERROR"}
+
+    media = existing or ArchivoMultimedia(id=media_id)
+    media.proveedor = MediaProviderEnum.CLOUDINARY
+    media.tipo = media_type
+    media.estado = MediaStatusEnum.READY
+    media.asset_id = uploaded.asset_id
+    media.public_id = uploaded.public_id
+    media.resource_type = uploaded.resource_type
+    media.delivery_type = uploaded.delivery_type
+    media.formato = uploaded.format
+    media.ancho = uploaded.width
+    media.alto = uploaded.height
+    media.peso_bytes = uploaded.bytes
+    media.intentos = (media.intentos or 0) + 1
+    if not existing:
+        db.add(media)
+    access.imagen_id = media_id
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        return {"media_id": str(media_id), "status": "RETRYABLE_ERROR"}
+    return {"media_id": str(media_id), "status": "ACCEPTED"}

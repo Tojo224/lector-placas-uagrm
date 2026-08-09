@@ -256,6 +256,7 @@ class OutboxRepository:
         with self.database.transaction() as connection:
             rows = connection.execute(
                 """SELECT * FROM outbox WHERE status IN ('PENDING','RETRY')
+                   AND event_type <> 'MEDIA_READY'
                    AND (next_attempt_at IS NULL OR next_attempt_at<=?)
                    ORDER BY created_at,id LIMIT ?""", (now, limit)
             ).fetchall()

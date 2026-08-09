@@ -15,7 +15,6 @@ from edge_agent.db.repositories import (
     StateRepository,
 )
 
-
 EXPECTED_TABLES = {
     "cached_vehicles",
     "cached_people",
@@ -60,7 +59,7 @@ def test_creates_minimal_schema_and_pragmas_from_scratch(tmp_path):
     assert diagnostics["journal_mode"] == "wal"
     assert diagnostics["foreign_keys"] is True
     assert diagnostics["busy_timeout_ms"] == 5000
-    assert diagnostics["schema_version"] == 1
+    assert diagnostics["schema_version"] == 2
 
 
 def test_migrations_are_versioned_and_idempotent(tmp_path):
@@ -72,7 +71,8 @@ def test_migrations_are_versioned_and_idempotent(tmp_path):
             "SELECT version, name FROM schema_migrations ORDER BY version"
         ).fetchall()
     assert [(row["version"], row["name"]) for row in migrations] == [
-        (1, "initial_edge_operational_schema")
+        (1, "initial_edge_operational_schema"),
+        (2, "durable_media_sync_state"),
     ]
 
 

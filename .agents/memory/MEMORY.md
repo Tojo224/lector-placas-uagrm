@@ -1,5 +1,48 @@
 # MEMORY
 
+## 2026-08-09 - Edge Agent Fase 7
+
+- `frontend/src/api/axios.js` queda como cliente central para autenticacion,
+  administracion, catalogos, historial y solicitudes. `api/edge.js` no adjunta
+  cookies/tokens humanos y apunta al Edge local.
+- En desarrollo Vite proxifica `/edge-api` a 127.0.0.1:8765. En el build servido
+  por Edge, el cliente usa `/api/v1/edge` en el mismo origen. Desde una SPA cloud
+  se usa loopback explicito, sin fallback al backend central.
+- El Edge sirve el build Vite y devuelve `index.html` para rutas SPA; `/api/*`
+  desconocidas conservan 404. Assets hashed usan cache immutable e index no-cache.
+- La ruta local `/` y `/subir-placa` monta directamente UploadPlate sin exigir
+  login central; las rutas administrativas siguen intactas en el despliegue cloud.
+- Polling llama analyze con `confirm=false`, por lo que no crea scans/accesos. Al
+  alcanzar consenso, React envia el frame de evidencia con `confirm=true` y
+  consume directamente ALLOW/denegacion, direccion, motivo y estado de media.
+- El scanner consulta health/status/version cada 5 segundos. Internet caido se
+  representa como sync offline sin detener OCR; Edge caido detiene envios y
+  muestra error explicito.
+- CORS no usa wildcard, admite solo origenes configurados y responde PNA. El modo
+  productivo recomendado es same-origin para eliminar mixed-content/PNA.
+
+## 2026-08-09 - Edge Agent Fase 6
+
+- Evidencias autorizadas se convierten localmente a WebP reutilizando
+  `ImageProcessingService` con configuracion inyectable, sin cargar settings
+  centrales ni Cloudinary desde el Edge.
+- Ruta fisica: `<EDGE_DATA_DIR>/spool/access/YYYY/MM/<media_id>.webp`. SQLite
+  solo guarda ruta relativa, tipo, relaciones, tamano, SHA-256 y estado.
+- Archivo temp, fsync y `os.replace` preceden una transaccion que crea
+  `local_media` y el Outbox `MEDIA_READY`; un fallo SQL compensa borrando archivo.
+- La migracion SQLite 2 agrega attempts, next_attempt_at, last_error y updated_at
+  a `local_media`; el worker recupera media IN_FLIGHT como RETRY al arrancar.
+- El endpoint central `POST /api/v1/edge-sync/media/{media_id}` valida identidad,
+  MIME WebP, maximo 5 MiB, tamano, checksum y relaciones scan/access. Solo el
+  backend usa Cloudinary.
+- Cloudinary recibe `edge-<media_id>` como public_id determinista con overwrite;
+  retransmitir tras timeout no crea otro recurso. Registro READY existente
+  responde DUPLICATE.
+- ACCEPTED/DUPLICATE marca media y Outbox SYNCED, pero el archivo no se elimina;
+  la retencion se implementara posteriormente.
+- Si el espacio libre cae bajo 100 MiB por defecto, la nueva evidencia se
+  rechaza localmente sin revertir la decision de acceso y health/status lo indica.
+
 ## 2026-08-09 - Edge Agent Fase 5
 
 - Aprovisionamiento: `POST /api/v1/edge-sync/devices/{id}/provision` requiere

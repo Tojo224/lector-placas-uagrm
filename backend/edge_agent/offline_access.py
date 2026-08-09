@@ -112,7 +112,7 @@ class OfflineAccessService:
                                  "direction": direction, "decision": "ALLOW",
                                  "occurred_at": now})
             return self._outcome("ALLOW", "Acceso autorizado por cache local.", vehicle,
-                                 direction, event_id, True)
+                                 direction, event_id, True, scan_id)
 
     def _record_denial(self, result: dict[str, Any], realtime: bool,
                        decision: str, reason: str) -> dict[str, Any]:
@@ -127,7 +127,8 @@ class OfflineAccessService:
                              "confidence": result.get("combined_confidence"),
                              "status": result.get("status"), "decision": decision,
                              "captured_at": utc_now()})
-        return self._outcome(decision, reason, vehicle=vehicle, persisted=True)
+        return self._outcome(decision, reason, vehicle=vehicle, persisted=True,
+                             scan_id=scan_id)
 
     @staticmethod
     def _insert_scan(connection, result, realtime, vehicle_id=None, device_id=None):
@@ -154,11 +155,11 @@ class OfflineAccessService:
 
     @staticmethod
     def _outcome(decision, reason, vehicle=None, direction=None, event_id=None,
-                 persisted=False):
+                 persisted=False, scan_id=None):
         return {"decision": decision, "reason": reason,
                 "offline_state": "LOCAL_AUTHORIZED" if decision == "ALLOW" else "LOCAL_DENIED",
                 "vehicle_found": vehicle is not None,
                 "vehicle_central_id": vehicle["central_id"] if vehicle else None,
                 "vehicle_owner_name": vehicle["owner_name"] if vehicle else None,
                 "direction": direction, "access_event_id": event_id,
-                "persisted": persisted}
+                "scan_id": scan_id, "persisted": persisted}

@@ -5,7 +5,9 @@
 - `EDGE-PHASE3-001` | `done` | Prioridad `alta` | Agregar SQLite operativo, migraciones locales y repositorios durables al Edge Agent | Dependencias: `EDGE-PHASE2-001`
 - `EDGE-PHASE4-001` | `done` | Prioridad `alta` | Implementar cache local poblado y decision de acceso offline | Dependencias: `EDGE-PHASE3-001`
 - `EDGE-PHASE5-001` | `done` | Prioridad `critica` | Aprovisionamiento Edge, renovacion automatica de snapshot y SyncWorker Outbox idempotente | Dependencias: `EDGE-PHASE4-001`
-- `EDGE-PHASE6-001` | `pending` | Prioridad `alta` | Sincronizacion asincrona de media local y Cloudinary | Dependencias: `EDGE-PHASE5-001`
+- `EDGE-PHASE6-001` | `done` | Prioridad `alta` | Sincronizacion asincrona de media local y Cloudinary | Dependencias: `EDGE-PHASE5-001`
+- `EDGE-PHASE7-001` | `done` | Prioridad `media` | Integracion completa del frontend con API Edge local | Dependencias: `EDGE-PHASE6-001`
+- `EDGE-PHASE8-001` | `pending` | Prioridad `critica` | Empaquetar Edge Agent y React como instalador Windows sin Python/Uvicorn manual | Dependencias: `EDGE-PHASE7-001`
 
 - `AUDIT-ROTATE-001` | `pending` | Prioridad `critica` | Rotar todos los secretos presentes históricamente en Git y coordinar actualización de entornos | Dependencias: acceso Neon/Cloudinary
 - `AUDIT-MIG-001` | `done` | Prioridad `alta` | Aplicada `c2d3e4f5a6b7` en Neon; `alembic current/check` y conservación de 16 filas verificados | Dependencias: ninguna

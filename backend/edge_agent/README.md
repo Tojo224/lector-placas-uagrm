@@ -26,7 +26,28 @@ EDGE_SYNC_POLL_SECONDS=5
 EDGE_SYNC_TIMEOUT_SECONDS=10
 EDGE_SYNC_BATCH_SIZE=25
 EDGE_SYNC_MAX_ATTEMPTS=10
+EDGE_MEDIA_MAX_UPLOAD_BYTES=5242880
+EDGE_MEDIA_MIN_FREE_BYTES=104857600
 ```
+
+## Interfaz React local
+
+El agente sirve `frontend/dist` por defecto y aplica fallback de SPA para rutas
+como `/subir-placa`. Puede usarse otra ubicacion con:
+
+```text
+EDGE_FRONTEND_DIR=<directorio del build Vite>
+```
+
+La URL operativa es `http://127.0.0.1:8765`. Al servirse desde el mismo origen,
+OCR no depende de CORS, Private Network Access ni contenido mixto. Para Vite en
+desarrollo, `/edge-api` se proxifica al agente local. Origenes adicionales se
+declaran explicitamente en `EDGE_UI_ORIGINS`; no se permite wildcard.
 
 El agente descarga el snapshot al arrancar cuando no existe uno local. OCR y la
 decision SQLite continúan funcionando aunque el backend central no responda.
+
+Las evidencias se convierten a WebP y se almacenan bajo `spool/access/YYYY/MM`
+dentro de `EDGE_DATA_DIR`. SQLite conserva solamente ruta relativa, checksum y
+estado. Un archivo confirmado por el backend no se elimina todavía; la política
+de retención pertenece a una fase posterior.
