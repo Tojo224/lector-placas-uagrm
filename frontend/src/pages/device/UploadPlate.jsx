@@ -6,6 +6,8 @@ import { formatPlate } from "../../utils/formatters";
 import VehicleFoundModal from "../../components/UploadPlate/VehicleFoundModal";
 import PlateNotFoundModal from "../../components/UploadPlate/PlateNotFoundModal";
 
+import { fuseOCRReads } from "../../utils/ocrFusion";
+
 const ownerInitialState = {
   code: "",
   full_name: "",
@@ -42,6 +44,8 @@ function UploadPlate() {
   const requestRef = useRef(null);
   const requestControllerRef = useRef(null);
   const detectionTimerRef = useRef(null);
+  const readsHistoryRef = useRef([]);
+  const workerRef = useRef(null);
   // Mapa de votos: texto_normalizado -> { count, bbox, score, text, lastFrameTs }
   const voteMapRef = useRef(new Map());
   const VOTES_NEEDED = 2; // OPT-D: 2 frames consecutivos — balance entre velocidad y anti-falsos-positivos
@@ -79,6 +83,24 @@ function UploadPlate() {
   const [decisionReason, setDecisionReason] = useState("");
   const activeModalRef = useRef(null);
   const edgeConnectedRef = useRef(false);
+
+  useEffect(() => {
+    // Inicializar el Web Worker para detección de movimiento en segundo plano
+    workerRef.current = new Worker(
+      new URL("../../utils/cameraWorker.js", import.meta.url),
+      { type: "module" }
+    );
+
+    // Configurar parámetros de detección de movimiento
+    workerRef.current.postMessage({
+      type: "INIT",
+      payload: { threshold: 20, minPercent: 0.05 }
+    });
+
+    return () => {
+      workerRef.current?.terminate();
+    };
+  }, []);
 
   useEffect(() => {
     activeModalRef.current = activeModal;
@@ -482,13 +504,39 @@ function UploadPlate() {
     requestControllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    // El siguiente frame se toma al terminar la petición anterior. Una pausa
-    // corta evita perder al vehículo mientras cruza el encuadre.
     let nextInterval = 250;
 
     try {
-      // El backend convierte a gris. Evitar getImageData/putImageData aquí
-      // reduce el tiempo entre la captura física y el envío del fotograma.
+      // --- Detección de Movimiento por Web Worker ---
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const buffer = imageData.data;
+
+      const hasMotion = await new Promise((resolve) => {
+        const handleMessage = (e) => {
+          if (e.data.type === "RESULT") {
+            workerRef.current.removeEventListener("message", handleMessage);
+            resolve(e.data.payload.hasMotion);
+          }
+        };
+        workerRef.current.addEventListener("message", handleMessage);
+        workerRef.current.postMessage({ type: "PROCESS", payload: { buffer } }, [buffer.buffer]);
+      });
+
+      if (!hasMotion) {
+        requestRef.current = null;
+        clearTimeout(timeoutId);
+        if (requestControllerRef.current === controller) {
+          requestControllerRef.current = null;
+        }
+        setScanError("");
+        setTrackingBoxes([]);
+        if (streamRef.current) {
+          detectionTimerRef.current = setTimeout(detectFrame, 800); // 800ms de espera si está estático
+        }
+        return;
+      }
+
+      // --- Envío del fotograma al Edge Agent ---
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.90));
       if (blob) {
         const formData = new FormData();
@@ -501,13 +549,21 @@ function UploadPlate() {
               ? analysis.placa_detectada.replace(/[^A-Z0-9]/gi, "").toUpperCase()
               : null);
 
-        // --- Sistema de votación por consenso ---
-        // Un texto solo se confirma cuando aparece N veces seguidas
         const voteMap = voteMapRef.current;
         const now = Date.now();
 
         if (normalizedText && normalizedText.length >= 4) {
-          // Texto detectado: sumar voto
+          // Guardar en el historial de lecturas recientes (máximo 5)
+          const readsHistory = readsHistoryRef.current;
+          readsHistory.push({ text: normalizedText, confidence: analysis.confianza });
+          if (readsHistory.length > 5) {
+            readsHistory.shift();
+          }
+
+          // Intentar fusionar las lecturas del historial
+          const fusedPlate = fuseOCRReads(readsHistory);
+
+          // Sumar voto para el tracking visual en pantalla
           const existing = voteMap.get(normalizedText);
           const newCount = existing ? existing.count + 1 : 1;
           voteMap.set(normalizedText, {
@@ -519,28 +575,18 @@ function UploadPlate() {
             lastFrameTs: now,
           });
 
-          // Limpiar textos que no han aparecido en los últimos 4 frames (~4s)
+          // Limpiar textos antiguos del mapa de votos
           for (const [key, val] of voteMap.entries()) {
             if (key !== normalizedText && now - val.lastFrameTs > 4000) {
               voteMap.delete(key);
             }
           }
 
-          // Verificar si algún texto alcanzó el umbral de votos
-          const winner = [...voteMap.entries()].find(
-            ([, v]) => v.isValidFormat && (
-              v.count >= VOTES_NEEDED ||
-              // Una lectura muy fuerte se captura inmediatamente: en movimiento
-              // puede no existir un segundo fotograma nítido.
-              (v.count === 1 && v.score >= 0.88)
-            )
-          );
+          // Ganador: si la fusión nos da una placa válida, o si un frame tiene altísima confianza y formato válido
+          const isWinner = fusedPlate || (analysis.es_formato_valido && analysis.confianza >= 0.88);
 
-          if (winner) {
-            // Confirmado por consenso → auto-captura
-            const [, winnerData] = winner;
-            // El polling usa 640px para OCR. Solo al confirmar capturamos una
-            // evidencia panoramica a la resolucion nativa de la camara.
+          if (isWinner) {
+            const finalPlate = fusedPlate || normalizedText;
             const evidenceCanvas = document.createElement("canvas");
             evidenceCanvas.width = videoRef.current.videoWidth || canvas.width;
             evidenceCanvas.height = videoRef.current.videoHeight || canvas.height;
@@ -555,18 +601,19 @@ function UploadPlate() {
               evidenceCanvas.toBlob(resolve, "image/jpeg", 0.92)
             );
             voteMap.clear();
+            readsHistoryRef.current = [];
             setTrackingBoxes([]);
             setAnalysisPreview(analysis);
-            setManualPlate(normalizedText);
+            setManualPlate(finalPlate);
             const confirmedForm = new FormData();
             confirmedForm.append("file", evidenceBlob || blob, "evidence.jpg");
             const confirmed = await analyzeWithEdge(confirmedForm, false, controller.signal, true);
             setAnalysisPreview(confirmed);
-            handleLookupPlate(normalizedText, evidenceBlob || blob, confirmed);
+            handleLookupPlate(finalPlate, evidenceBlob || blob, confirmed);
             return;
           }
 
-          // Mostrar caja con contador de votos
+          // Mostrar cajas de seguimiento en la UI
           let newBoxes = [];
           if (analysis.raw_bboxes && analysis.raw_bboxes.length > 0) {
             newBoxes = analysis.raw_bboxes.map(bbox => {
@@ -580,7 +627,7 @@ function UploadPlate() {
             newBoxes.push({
               bbox: [x1, y1, x2 - x1, y2 - y1],
               score: analysis.confianza,
-              text: analysis.placa_normalizada || analysis.placa_detectada,
+              text: fusedPlate || analysis.placa_normalizada || analysis.placa_detectada,
               votes: entry ? entry.count : 1,
               votesNeeded: VOTES_NEEDED,
               type: 'plate-voting',
@@ -588,12 +635,10 @@ function UploadPlate() {
           }
           setScanError("");
           setTrackingBoxes(newBoxes);
-
-          // OPT-D: Throttle 500ms (antes 600ms) — más frames sin afectar OCR CPU
           nextInterval = 500;
 
         } else {
-          // Sin texto válido: limpiar votos viejos y reducir frecuencia
+          // Sin texto válido: limpiar votos antiguos
           for (const [key, val] of voteMap.entries()) {
             if (now - val.lastFrameTs > 3000) voteMap.delete(key);
           }

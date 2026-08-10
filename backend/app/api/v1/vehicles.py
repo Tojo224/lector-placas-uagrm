@@ -380,6 +380,28 @@ async def delete_vehicle(
                 detail="No tienes permiso para eliminar este vehículo.",
         )
 
+    from app.db.models import EstadoCampus, Escaneado, SolicitudRegistroVehiculo
+    from sqlalchemy import update, delete
+
+    # 1. Eliminar el estado del campus asociado
+    await db.execute(
+        delete(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle_id)
+    )
+
+    # 2. Desasociar los registros de escaneo
+    await db.execute(
+        update(Escaneado)
+        .where(Escaneado.vehiculo_id == vehicle_id)
+        .values(vehiculo_id=None)
+    )
+
+    # 3. Desasociar solicitudes de registro de vehículos
+    await db.execute(
+        update(SolicitudRegistroVehiculo)
+        .where(SolicitudRegistroVehiculo.vehiculo_creado_id == vehicle_id)
+        .values(vehiculo_creado_id=None)
+    )
+
     await db.delete(vehicle)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

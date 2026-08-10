@@ -8,6 +8,49 @@ import Pagination from "../components/Pagination";
 
 const emptyForm = { placa: "", propietario_usuario_id: "", marca_id: "", tipo_vehiculo_id: "", color: "", color_hex: "" };
 
+const CATALOG_COLORS = {
+  "BLANCO": { r: 235, g: 235, b: 235 },
+  "NEGRO": { r: 28, g: 28, b: 28 },
+  "GRIS": { r: 105, g: 105, b: 105 },
+  "PLATEADO": { r: 178, g: 178, b: 178 },
+  "ROJO": { r: 190, g: 40, b: 40 },
+  "AZUL": { r: 35, g: 85, b: 180 },
+  "VERDE": { r: 65, g: 145, b: 65 },
+  "AMARILLO": { r: 220, g: 205, b: 35 },
+  "MARRON": { r: 115, g: 75, b: 45 },
+};
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+}
+
+function getClosestColorName(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return "DESCONOCIDO";
+
+  let closestName = "DESCONOCIDO";
+  let minDistance = Infinity;
+
+  Object.entries(CATALOG_COLORS).forEach(([name, catRgb]) => {
+    const dist = Math.sqrt(
+      Math.pow(rgb.r - catRgb.r, 2) +
+      Math.pow(rgb.g - catRgb.g, 2) +
+      Math.pow(rgb.b - catRgb.b, 2)
+    );
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestName = name;
+    }
+  });
+
+  return closestName;
+}
+
 const translateStatus = (status) => {
   switch (status) {
     case "PENDING":
@@ -50,6 +93,7 @@ export default function VehicleRegistrationRequests() {
   const [confirm, setConfirm] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
     setCurrentPage(1);
@@ -112,8 +156,13 @@ export default function VehicleRegistrationRequests() {
     }
     try {
       setSaving(true);
+      setError("");
+      setSuccessMessage("");
       await approveVehicleRegistrationRequest(selected.id, form);
+      const approvedPlate = form.placa;
       setSelected(null);
+      setSuccessMessage(`Solicitud aprobada y vehículo con placa ${approvedPlate} registrado con éxito.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
       await load();
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudo aprobar la solicitud.");
@@ -126,8 +175,13 @@ export default function VehicleRegistrationRequests() {
   const reject = async () => {
     try {
       setSaving(true);
+      setError("");
+      setSuccessMessage("");
       await rejectVehicleRegistrationRequest(selected.id);
+      const rejectedPlate = selected.placa_sugerida;
       setSelected(null);
+      setSuccessMessage(`Solicitud de registro para la placa ${rejectedPlate} rechazada con éxito.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
       await load();
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudo rechazar la solicitud.");
@@ -168,6 +222,7 @@ export default function VehicleRegistrationRequests() {
         isRefreshing={loading}
       />
 
+      {successMessage && <p className="success-text" style={{ padding: "0.75rem", borderRadius: "8px", backgroundColor: "#d1fae5", color: "#065f46" }}>{successMessage}</p>}
       {error && <p className="error-text">{error}</p>}
       {!filteredRequests.length && (
         <div className="card">
@@ -221,106 +276,126 @@ export default function VehicleRegistrationRequests() {
         onPageChange={(page) => setCurrentPage(page)}
       />
 
-      {selected && (
-        <div className="modal-backdrop">
-          <form className="modal-card modal-large registration-form" onSubmit={e => { e.preventDefault(); setConfirm({ type: "approve" }); }}>
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">Solicitud pendiente</p>
-                <h2>Registrar nuevo vehículo</h2>
-              </div>
-              <button type="button" className="ghost-button" onClick={() => setSelected(null)}>×</button>
-            </div>
-            {images[selected.id] && (
-              <img
-                src={images[selected.id]}
-                alt="Evidencia del vehículo"
-                style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 12, background: "#f1f5f9", marginBottom: "1rem" }}
-              />
-            )}
-            <div className="form-grid">
-              <label>Placa
-                <input value={form.placa} onChange={e => update("placa", e.target.value.toUpperCase())} required />
-              </label>
-              <label>Confianza OCR
-                <input value={`${Math.round(selected.confianza_placa * 100)}%`} readOnly />
-              </label>
-              <label>Propietario asociado
-                <select value={form.propietario_usuario_id} onChange={e => update("propietario_usuario_id", e.target.value)} required>
-                  <option value="">Selecciona un propietario</option>
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>{u.nombre} {u.apellido_paterno} — {u.carnet}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Marca
-                <select value={form.marca_id} onChange={e => update("marca_id", e.target.value)} required>
-                  <option value="">Selecciona una marca</option>
-                  {brands.map(x => (
-                    <option key={x.id} value={x.id}>{x.nombre}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Tipo sugerido por RF-DETR
-                <input
-                  value={selected.tipo_sugerido?.nombre || "DESCONOCIDO"}
-                  readOnly
-                />
-                <small className="muted-text">
-                  Confianza: {selected.confianza_tipo != null
-                    ? `${Math.round(selected.confianza_tipo * 100)}%`
-                    : "No disponible"}
-                </small>
-              </label>
-              <label>Tipo confirmado
-                <select value={form.tipo_vehiculo_id} onChange={e => update("tipo_vehiculo_id", e.target.value)} required>
-                  <option value="">Selecciona un tipo</option>
-                  {types.map(x => (
-                    <option key={x.id} value={x.id}>{x.nombre}</option>
-                  ))}
-                </select>
-              </label>
-              <label>Color sugerido
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <input value={form.color} onChange={e => update("color", e.target.value)} required style={{ flex: 1 }} />
-                  <input 
-                    type="color" 
-                    value={form.color_hex || "#cccccc"} 
-                    onChange={e => update("color_hex", e.target.value)}
-                    style={{
-                      width: "38px",
-                      height: "38px",
-                      padding: "2px",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: "6px",
-                      cursor: "pointer",
-                      flexShrink: 0
-                    }}
-                  />
+      {selected && (() => {
+        const isPending = selected.estado === "PENDIENTE";
+        return (
+          <div className="modal-backdrop">
+            <form className="modal-card modal-large registration-form" onSubmit={e => { e.preventDefault(); setConfirm({ type: "approve" }); }}>
+              <div className="modal-header">
+                <div>
+                  <p className="eyebrow">Solicitud {selected.estado.toLowerCase()}</p>
+                  <h2>{isPending ? "Registrar nuevo vehículo" : "Detalle de la solicitud"}</h2>
                 </div>
-                <small className="muted-text">
-                  Sugerencia automática editable; confirma el color observando la evidencia.
-                </small>
-              </label>
-              <label>Confianza del color
-                <input
-                  value={selected.confianza_color != null
-                    ? `${Math.round(selected.confianza_color * 100)}%`
-                    : "No disponible"}
-                  readOnly
+                <button type="button" className="ghost-button" onClick={() => setSelected(null)}>×</button>
+              </div>
+              {images[selected.id] && (
+                <img
+                  src={images[selected.id]}
+                  alt="Evidencia del vehículo"
+                  style={{ width: "100%", maxHeight: 260, objectFit: "contain", borderRadius: 12, background: "#f1f5f9", marginBottom: "1rem" }}
                 />
-                <small className="muted-text">
-                  Método: {translateMethod(selected.metodo_color)}
-                </small>
-              </label>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="ghost-button" onClick={() => setConfirm({ type: "reject" })} disabled={saving}>Rechazar</button>
-              <button type="submit" disabled={saving}>Aprobar</button>
-            </div>
-          </form>
-        </div>
-      )}
+              )}
+              <div className="details-grid">
+                <label>Placa
+                  <input value={form.placa} onChange={e => update("placa", e.target.value.toUpperCase())} required readOnly={!isPending} />
+                </label>
+                <label>Confianza OCR
+                  <input value={`${Math.round(selected.confianza_placa * 100)}%`} readOnly />
+                </label>
+                <label>Propietario asociado
+                  <select value={form.propietario_usuario_id} onChange={e => update("propietario_usuario_id", e.target.value)} required disabled={!isPending}>
+                    <option value="">Selecciona un propietario</option>
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>{u.nombre} {u.apellido_paterno} — {u.carnet}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Marca
+                  <select value={form.marca_id} onChange={e => update("marca_id", e.target.value)} required disabled={!isPending}>
+                    <option value="">Selecciona una marca</option>
+                    {brands.map(x => (
+                      <option key={x.id} value={x.id}>{x.nombre}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Tipo sugerido por RF-DETR
+                  <input
+                    value={selected.tipo_sugerido?.nombre || "DESCONOCIDO"}
+                    readOnly
+                  />
+                  <small className="muted-text">
+                    Confianza: {selected.confianza_tipo != null
+                      ? `${Math.round(selected.confianza_tipo * 100)}%`
+                      : "No disponible"}
+                  </small>
+                </label>
+                <label>Tipo confirmado
+                  <select value={form.tipo_vehiculo_id} onChange={e => update("tipo_vehiculo_id", e.target.value)} required disabled={!isPending}>
+                    <option value="">Selecciona un tipo</option>
+                    {types.map(x => (
+                      <option key={x.id} value={x.id}>{x.nombre}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Color sugerido
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <input value={form.color} onChange={e => update("color", e.target.value.toUpperCase())} required style={{ flex: 1 }} readOnly={!isPending} />
+                    <input 
+                      type="color" 
+                      value={form.color_hex || "#cccccc"} 
+                      onChange={e => {
+                        const hex = e.target.value;
+                        const closest = getClosestColorName(hex);
+                        setForm(current => ({
+                          ...current,
+                          color_hex: hex,
+                          color: closest
+                        }));
+                      }}
+                      disabled={!isPending}
+                      style={{
+                        width: "100px",
+                        height: "42px",
+                        padding: "2px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        cursor: isPending ? "pointer" : "default",
+                        flexShrink: 0
+                      }}
+                    />
+                  </div>
+                  <small className="muted-text">
+                    {isPending 
+                      ? "Sugerencia automática editable; confirma el color observando la evidencia." 
+                      : "Color registrado para esta solicitud."}
+                  </small>
+                </label>
+                <label>Confianza del color
+                  <input
+                    value={selected.confianza_color != null
+                      ? `${Math.round(selected.confianza_color * 100)}%`
+                      : "No disponible"}
+                    readOnly
+                  />
+                  <small className="muted-text">
+                    Método: {translateMethod(selected.metodo_color)}
+                  </small>
+                </label>
+              </div>
+              {isPending ? (
+                <div className="modal-actions">
+                  <button type="button" className="ghost-button" onClick={() => setConfirm({ type: "reject" })} disabled={saving}>Rechazar</button>
+                  <button type="submit" disabled={saving}>Aprobar</button>
+                </div>
+              ) : (
+                <div className="modal-actions">
+                  <button type="button" className="ghost-button" onClick={() => setSelected(null)}>Cerrar</button>
+                </div>
+              )}
+            </form>
+          </div>
+        );
+      })()}
 
       {confirm && (
         <ConfirmModal

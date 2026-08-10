@@ -36,7 +36,12 @@ async def list_requests(db: AsyncSession = Depends(get_db), _: Usuario = Depends
 
 @router.post("/{request_id}/approve", response_model=SolicitudRegistroResponse)
 async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, db: AsyncSession = Depends(get_db), reviewer: Usuario = Depends(require_staff)):
-    request = await db.scalar(select(SolicitudRegistroVehiculo).where(SolicitudRegistroVehiculo.id == request_id).with_for_update())
+    request = await db.scalar(
+        select(SolicitudRegistroVehiculo)
+        .options(selectinload(SolicitudRegistroVehiculo.tipo_sugerido))
+        .where(SolicitudRegistroVehiculo.id == request_id)
+        .with_for_update()
+    )
     if not request: raise HTTPException(404, "Solicitud no encontrada")
     if request.estado != SolicitudRegistroEstadoEnum.PENDING: raise HTTPException(409, "La solicitud ya fue revisada")
     plate = normalize_plate_text(payload.placa or request.placa_sugerida)
@@ -59,6 +64,7 @@ async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, d
 async def reject_request(request_id: UUID, payload: SolicitudRegistroReject, db: AsyncSession = Depends(get_db), reviewer: Usuario = Depends(require_staff)):
     request = await db.scalar(
         select(SolicitudRegistroVehiculo)
+        .options(selectinload(SolicitudRegistroVehiculo.tipo_sugerido))
         .where(SolicitudRegistroVehiculo.id == request_id)
         .with_for_update()
     )

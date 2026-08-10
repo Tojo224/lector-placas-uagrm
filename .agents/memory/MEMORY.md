@@ -19,6 +19,16 @@
 - Asegurado que las solicitudes de registro en la vista del administrador se ordenen explícitamente en forma descendente (última creada primero) según su fecha de registro en el frontend.
 - Estandarizado el formateo de fecha y hora a nivel frontend forzando la zona horaria `"America/La_Paz"` (Bolivia) en el Dashboard, solicitudes, y bitácoras para evitar desfases.
 - Añadido el campo de fecha y hora de registro en las tarjetas de solicitud del frontend al lado de la confianza OCR.
+- Implementado un Web Worker (`cameraWorker.js` y `motionDetector.js`) en el frontend para ejecutar detección de movimiento mediante comparación rápida de pixeles de forma asíncrona, pausando el envío de fotogramas al OCR local cuando la escena está completamente estática.
+- Creada una utilidad de alineación posicional de caracteres (`ocrFusion.js`) para fusionar fotogramas consecutivos con lecturas parciales, optimizando el tiempo de respuesta y evitando bloqueos innecesarios.
+- Vinculado interactivamente el seleccionador HTML de color en el formulario de solicitudes, calculando la distancia euclidiana RGB al color más cercano de la paleta permitida (`BLANCO`, `NEGRO`, `GRIS`, `PLATEADO`, `ROJO`, `AZUL`, `VERDE`, `AMARILLO`, `MARRON`) para rellenar la sugerencia de texto al instante.
+- Asegurada la inmutabilidad de solicitudes ya procesadas (`APROBADA` o `RECHAZADA`) en el frontend, convirtiendo el formulario en modo de solo lectura/deshabilitado y reemplazando los botones de acción por un botón de cierre.
+- Optimizado el espacio y maquetación de los modales de creación/edición de usuarios y revisión de solicitudes, alineando los campos en una cuadrícula de múltiples columnas (`.details-grid`) para aprovechar el ancho del modal y evitar scrolling vertical excesivo.
+- Creado modal de vista detallada de usuarios en la pestaña "Gestionar Usuarios", mostrando foto de perfil, carnet, rol, estado, ID único y fechas de registro/actualización locales.
+- Creado modal de vista detallada de dispositivos ("Ver detalles" en la tabla) en la pestaña "Gestionar Dispositivos", mostrando nombre, ubicación, clase, webhook, ID y las marcas temporales (`creado_el`, `actualizado_el`) en zona horaria boliviana.
+- Aumentado el tamaño del bloque seleccionador de color a `100px` x `42px` para proporcionar una vista previa grande y clara del color que se va a registrar.
+- Implementado el selector de color visual interactivo en los formularios de creación y edición de vehículos en la pestaña "Gestionar Vehículos", vinculando el color picker a la detección de nombres del catálogo en español de forma transparente en el frontend sin requerir cambios de persistencia en el backend.
+- Añadidos círculos pintados de previsualización de color junto al texto del color en la tabla de vehículos y en la ficha de detalle de información de vehículo.
 - Proxificada la API central en `edge.js` para evitar importar de `plates` en `UploadPlate.jsx`, satisfaciendo la restricción del test de frontend.
 - Optimizado el analizador híbrido `HybridVehicleColorAnalyzer` para evitar invocar el regresor ONNX si OpenCV clasifica el color con alta confianza, ahorrando inferencias y resolviendo aserciones del test suite.
 - Validación: 145/145 pruebas unitarias correctas en Pytest, compilación Vite OK, smoke tests locales pasados y aplicados en Postgres de Neon.
