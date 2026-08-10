@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import replace
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import UUID
@@ -17,6 +19,10 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.responses import Response
+from starlette.staticfiles import NotModifiedResponse
+from starlette.types import Scope
 from pydantic import BaseModel
 
 from edge_agent import __version__
@@ -38,6 +44,40 @@ logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = 5 * 1024 * 1024
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png"}
+EDGE_STATIC_MIME_TYPES = {
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".wasm": "application/wasm",
+}
+
+
+def _edge_media_type(path: str | os.PathLike[str]) -> str | None:
+    return EDGE_STATIC_MIME_TYPES.get(Path(path).suffix.lower())
+
+
+class EdgeStaticFiles(StaticFiles):
+    """Serve Vite assets without consulting host Windows MIME associations."""
+
+    def file_response(
+        self,
+        full_path: str | os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        request_headers = Headers(scope=scope)
+        response = FileResponse(
+            full_path,
+            status_code=status_code,
+            stat_result=stat_result,
+            media_type=_edge_media_type(full_path),
+        )
+        if self.is_not_modified(response.headers, request_headers):
+            return NotModifiedResponse(response.headers)
+        return response
 
 
 class SnapshotVehicle(BaseModel):
@@ -426,16 +466,20 @@ def create_edge_app(
     assets_dir = frontend_dir / "assets"
     if index_file.is_file():
         if assets_dir.is_dir():
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="edge-ui-assets")
+            app.mount(
+                "/assets",
+                EdgeStaticFiles(directory=assets_dir),
+                name="edge-ui-assets",
+            )
 
         @app.get("/", include_in_schema=False)
         @app.get("/{frontend_path:path}", include_in_schema=False)
         async def edge_frontend(frontend_path: str = ""):
-            if frontend_path.startswith("api/"):
+            if frontend_path == "assets" or frontend_path.startswith(("api/", "assets/")):
                 raise HTTPException(status_code=404, detail="Ruta no encontrada.")
             candidate = (frontend_dir / frontend_path).resolve()
             if frontend_dir in candidate.parents and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(index_file)
+                return FileResponse(candidate, media_type=_edge_media_type(candidate))
+            return FileResponse(index_file, media_type="text/html")
 
     return app

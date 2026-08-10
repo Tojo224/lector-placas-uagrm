@@ -10,6 +10,7 @@
 - `EDGE-PHASE8-001` | `done` | Prioridad `critica` | Empaquetar Edge Agent, modelos OCR y React como distribucion Windows onedir sin Python/Uvicorn manual | Dependencias: `EDGE-PHASE7-001`
 - `EDGE-PHASE9-001` | `done` | Prioridad `critica` | Crear UAGRMPlateAgent-Setup.exe con ACL de ProgramData, DPAPI CurrentUser e inicio automatico ONLOGON | Dependencias: `EDGE-PHASE8-001`
 - `EDGE-PERF-001` | `done` | Prioridad `critica` | Instrumentar y optimizar startup/inferencia del EXE instalado sin cambiar modelos ni precision | Dependencias: `EDGE-PHASE9-001`
+- `EDGE-MIME-001` | `done` | Prioridad `critica` | Servir assets Vite con MIME explicito portable y 404 real fuera del fallback SPA | Dependencias: `EDGE-PHASE9-001`
 - `EDGE-SIGN-001` | `pending` | Prioridad `critica` | Firmar Authenticode EXE y Setup con certificado institucional y validar SmartScreen/antivirus | Dependencias: certificado institucional
 - `EDGE-FIELD-001` | `pending` | Prioridad `critica` | Validar instalacion en VM limpia y PC fisica de porteria con usuario operativo, camara y backend institucional | Dependencias: hardware y credencial Edge real
 

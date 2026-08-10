@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from edge_agent.app import create_edge_app
 from edge_agent.config import EdgeSettings
 from fastapi.testclient import TestClient
@@ -17,6 +19,7 @@ def test_edge_serves_react_build_and_spa_routes_offline(tmp_path):
     assets.mkdir(parents=True)
     (frontend / "index.html").write_text("<html>edge scanner</html>", encoding="utf-8")
     (assets / "app.js").write_text("window.edge=true", encoding="utf-8")
+    (assets / "app.css").write_text("body{}", encoding="utf-8")
     app = create_edge_app(
         EdgeSettings(data_dir=tmp_path, frontend_dir=frontend),
         engine_factory=lambda _settings: fake_engine(),
@@ -25,11 +28,61 @@ def test_edge_serves_react_build_and_spa_routes_offline(tmp_path):
         root = client.get("/")
         nested = client.get("/subir-placa")
         asset = client.get("/assets/app.js")
+        stylesheet = client.get("/assets/app.css")
+        missing_asset = client.get("/assets/missing.js")
         missing_api = client.get("/api/does-not-exist")
     assert root.status_code == 200 and "edge scanner" in root.text
     assert nested.status_code == 200 and "edge scanner" in nested.text
     assert asset.headers["cache-control"].endswith("immutable")
+    assert asset.headers["content-type"] == "application/javascript"
+    assert stylesheet.headers["content-type"] == "text/css; charset=utf-8"
+    assert missing_asset.status_code == 404
+    assert "edge scanner" not in missing_asset.text
     assert missing_api.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_content_type"),
+    [
+        ("app.js", "application/javascript"),
+        ("app.css", "text/css; charset=utf-8"),
+        ("chunk.mjs", "application/javascript"),
+        ("manifest.json", "application/json"),
+        ("logo.svg", "image/svg+xml"),
+        ("runtime.wasm", "application/wasm"),
+    ],
+)
+def test_edge_static_mime_types_are_independent_from_windows(
+    tmp_path, monkeypatch, filename, expected_content_type
+):
+    frontend = tmp_path / "frontend-dist"
+    assets = frontend / "assets"
+    assets.mkdir(parents=True)
+    (frontend / "index.html").write_text("<html>edge scanner</html>", encoding="utf-8")
+    (assets / filename).write_bytes(b"asset")
+    monkeypatch.setattr("mimetypes.guess_type", lambda *_args, **_kwargs: ("text/plain", None))
+    app = create_edge_app(
+        EdgeSettings(data_dir=tmp_path, frontend_dir=frontend),
+        engine_factory=lambda _settings: fake_engine(),
+    )
+    with TestClient(app) as client:
+        response = client.get(f"/assets/{filename}")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == expected_content_type
+
+
+def test_missing_assets_never_use_spa_fallback_when_assets_dir_is_absent(tmp_path):
+    frontend = tmp_path / "frontend-dist"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<html>edge scanner</html>", encoding="utf-8")
+    app = create_edge_app(
+        EdgeSettings(data_dir=tmp_path, frontend_dir=frontend),
+        engine_factory=lambda _settings: fake_engine(),
+    )
+    with TestClient(app) as client:
+        response = client.get("/assets/missing.js")
+    assert response.status_code == 404
+    assert "edge scanner" not in response.text
 
 
 def test_edge_cors_supports_local_dev_and_private_network_preflight(tmp_path):

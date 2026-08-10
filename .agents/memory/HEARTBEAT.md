@@ -1,5 +1,20 @@
 # HEARTBEAT
 
+## Estado vigente - 2026-08-09 - Portabilidad MIME del frontend Edge
+
+- **Foco**: corregir exclusivamente la entrega de assets Vite en Windows.
+- **Completado**:
+  - El servidor Edge asigna MIME explicito a JS/MJS, CSS, JSON, SVG y WASM sin
+    consultar asociaciones del host.
+  - `/assets/*` inexistente devuelve 404 real y nunca usa `index.html` como SPA
+    fallback; las rutas React como `/subir-placa` conservan el fallback HTML.
+- **Validado**: 12 pruebas focalizadas, incluyendo `mimetypes` forzado a
+  `text/plain`; 142 pass/2 skip en verificador; EXE y Setup reconstruidos e
+  instalados. El EXE instalado devolvio JS `application/javascript`, CSS
+  `text/css; charset=utf-8`, SPA `text/html` y asset ausente 404; OCR/SQLite
+  permanecieron READY.
+- **Limite**: no se modificaron OCR, modelos, sincronizacion ni negocio.
+
 ## Estado vigente - 2026-08-09 - Optimizacion startup/inferencia 0.2.0
 
 - **Foco**: medir y reducir exclusivamente arranque e inferencia del EXE

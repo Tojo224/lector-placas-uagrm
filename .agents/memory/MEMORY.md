@@ -1,5 +1,20 @@
 # MEMORY
 
+## 2026-08-09 - Correccion MIME portable del servidor estatico Edge
+
+- `FileResponse`/`StaticFiles` terminaban consultando `mimetypes`, que en una
+  segunda PC Windows resolvio modulos Vite como `text/plain`. `EdgeStaticFiles`
+  ahora pasa `media_type` explicito para `.js`, `.mjs`, `.css`, `.json`, `.svg`
+  y `.wasm`, por lo que no depende del registro MIME local.
+- El catch-all React rechaza explicitamente `assets` y `assets/*`. Un archivo
+  ausente en el mount o incluso un build sin directorio assets devuelve 404;
+  solo rutas de navegacion reciben `index.html` con `text/html` explicito.
+- Prueba instalada desde Program Files: JS 200 `application/javascript`, CSS
+  200 `text/css; charset=utf-8`, `/subir-placa` 200 `text/html` y JS inexistente
+  404. Health posterior: READY, OCR y SQLite correctos.
+- Validacion: 12 pruebas focalizadas, 142 pass/2 skip, build Vite, verificador,
+  smoke central, EXE/Setup reconstruidos e instalados y diff-check correctos.
+
 ## 2026-08-09 - Perfil y optimizacion del EXE instalado 0.2.0
 
 - El baseline del EXE instalado fue API 30,923 ms, React 31,205 ms y READY
