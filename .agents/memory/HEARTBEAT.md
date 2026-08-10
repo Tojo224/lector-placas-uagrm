@@ -1,5 +1,46 @@
 # HEARTBEAT
 
+## Estado vigente - 2026-08-10 - Identidad automatica de instalacion Edge
+
+- **Foco**: eliminar Device ID/Edge Key manuales del aprovisionamiento nuevo sin
+  ligar el SyncWorker a una sesion humana.
+- **Completado**:
+  - El primer login online ADMINISTRADOR/OPERADOR autoriza el alta de un
+    `edge_installation`; PostgreSQL guarda solo hash y Edge protege el secreto
+    tecnico con DPAPI.
+  - SyncWorker usa `X-Edge-Installation-ID` y su bearer tecnico tras logout,
+    reinicio y reconexion. El ID no secreto persiste en `agent.json`.
+  - `Dispositivo` queda separado y sin seleccion obligatoria. Credenciales
+    legacy por Dispositivo permanecen aceptadas para instalaciones existentes.
+- **Validado**: 51 pruebas focalizadas; 155 pass/2 skip en verificador completo;
+  build Vite, smoke local y `git diff --check` correctos.
+- **Despliegue requerido**: aplicar migracion Alembic
+  `e4f5a6b7c8d9_add_edge_installations` junto al backend central antes de usar
+  el aprovisionamiento nuevo.
+
+## Estado vigente - 2026-08-10 - Login local derivado para staff
+
+- **Foco**: configuracion Edge solo con URL y autenticacion offline exclusiva
+  para ADMINISTRADOR/OPERADOR, sin copiar hashes centrales.
+- **Completado**:
+  - El primer login en una PC consulta `/api/auth/login`; si el rol es staff,
+    descarta el token central y deriva un verificador PBKDF2 Edge con salt nuevo.
+  - Migracion SQLite local 3 agrega `local_auth_users` con ID central, carnet,
+    rol permitido, verificador local y timestamps. No guarda password, hash de
+    PostgreSQL ni token humano.
+  - Login posterior funciona offline; usuarios nunca validados requieren una
+    primera conexion. USUARIO/DISPOSITIVO se rechazan y cualquier fila legacy
+    con rol no permitido se elimina/ignora.
+  - React Edge protege scanner con sesion local y admite solo ADMINISTRADOR u
+    OPERADOR. `/configuracion` pide solo URL; ID/Edge Key existentes quedan
+    ocultos y preservados para SyncWorker.
+- **Validado**: 35 pruebas focalizadas; 151 pass/2 skip en verificador; build
+  Vite, smoke central, EXE/Setup reconstruidos e instalados. EXE instalado:
+  SQLite v3, OCR READY, login offline nuevo 401, MIME JS/CSS correcto y asset
+  inexistente 404.
+- **Limite**: PostgreSQL, RoleEnum.DISPOSITIVO y protocolo tecnico Edge no se
+  modificaron; instalaciones nuevas sin credencial tecnica aun no sincronizan.
+
 ## Estado vigente - 2026-08-09 - Portabilidad MIME del frontend Edge
 
 - **Foco**: corregir exclusivamente la entrega de assets Vite en Windows.

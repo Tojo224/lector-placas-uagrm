@@ -2,15 +2,14 @@ import { useState } from "react";
 import { provisionEdge } from "../../api/edge";
 
 export default function EdgeProvisioning() {
-  const [form, setForm] = useState({ central_url: "", device_id: "", device_key: "" });
+  const [centralUrl, setCentralUrl] = useState("");
   const [state, setState] = useState({ busy: false, error: "", done: false });
 
   const submit = async (event) => {
     event.preventDefault();
     setState({ busy: true, error: "", done: false });
     try {
-      await provisionEdge(form);
-      setForm((current) => ({ ...current, device_key: "" }));
+      await provisionEdge({ central_url: centralUrl });
       setState({ busy: false, error: "", done: true });
     } catch (error) {
       setState({ busy: false, done: false, error: error?.response?.data?.detail || "No se pudo completar el aprovisionamiento." });
@@ -22,20 +21,18 @@ export default function EdgeProvisioning() {
       <section className="card" style={{ width: "min(620px, 100%)", padding: "2rem" }}>
         <p style={{ color: "var(--color-secondary)", fontWeight: 700 }}>UAGRM PLATE AGENT</p>
         <h1>Configuración inicial</h1>
-        <p>Conecta esta instalación con el dispositivo creado por un administrador. La clave se protege con Windows DPAPI y no volverá a mostrarse.</p>
+        <p>Indica el backend central que validará el primer acceso de cada administrador u operador.</p>
         {state.done ? (
           <div role="status">
-            <h2>Instalación provisionada correctamente</h2>
-            <p>El snapshot operativo fue descargado y la sincronización ya puede comenzar.</p>
-            <a href="/subir-placa"><button type="button">Abrir scanner</button></a>
+            <h2>Backend configurado correctamente</h2>
+            <p>Ya puedes iniciar sesión. La primera autenticación en esta PC requiere conexión.</p>
+            <a href="/login"><button type="button">Iniciar sesión</button></a>
           </div>
         ) : (
           <form onSubmit={submit} style={{ display: "grid", gap: "1rem" }}>
-            <label>URL del backend central<input type="url" required placeholder="https://backend.uagrm.edu.bo" value={form.central_url} onChange={(e) => setForm({ ...form, central_url: e.target.value })} /></label>
-            <label>ID del dispositivo<input required autoComplete="off" value={form.device_id} onChange={(e) => setForm({ ...form, device_id: e.target.value })} /></label>
-            <label>Clave Edge<input type="password" required autoComplete="new-password" value={form.device_key} onChange={(e) => setForm({ ...form, device_key: e.target.value })} /></label>
+            <label>URL del backend central<input type="url" required placeholder="https://backend.uagrm.edu.bo" value={centralUrl} onChange={(e) => setCentralUrl(e.target.value)} /></label>
             {state.error && <p role="alert" style={{ color: "var(--color-secondary)" }}>{state.error}</p>}
-            <button disabled={state.busy}>{state.busy ? "Validando y descargando snapshot..." : "Aprovisionar instalación"}</button>
+            <button disabled={state.busy}>{state.busy ? "Guardando..." : "Guardar configuración"}</button>
           </form>
         )}
       </section>

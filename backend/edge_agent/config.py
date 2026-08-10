@@ -49,6 +49,8 @@ class EdgeSettings:
     cache_max_age_hours: float = 24.0
     duplicate_cooldown_seconds: int = 30
     central_url: str | None = None
+    installation_id: str | None = None
+    installation_key: str | None = None
     device_id: str | None = None
     device_key: str | None = None
     snapshot_refresh_seconds: int = 900
@@ -110,6 +112,12 @@ class EdgeSettings:
             ),
             central_url=(os.getenv("EDGE_CENTRAL_URL", "").strip()
                          or product_config.central_url),
+            installation_id=(os.getenv("EDGE_INSTALLATION_ID", "").strip()
+                             or product_config.installation_id),
+            installation_key=(
+                provider.get_device_key()
+                if product_config.installation_provisioned else None
+            ),
             device_id=(os.getenv("EDGE_DEVICE_ID", "").strip()
                        or product_config.device_id),
             device_key=provider.get_device_key(),
@@ -139,7 +147,9 @@ class EdgeSettings:
         )
 
     def sync_configured(self) -> bool:
-        return bool(self.central_url and self.device_id and self.device_key)
+        installation_ready = self.installation_id and self.installation_key
+        legacy_ready = self.device_id and self.device_key
+        return bool(self.central_url and (installation_ready or legacy_ready))
 
     def resolved_data_dir(self) -> Path:
         return (self.data_dir or default_data_dir()).expanduser().resolve()

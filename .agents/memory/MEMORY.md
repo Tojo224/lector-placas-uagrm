@@ -1,5 +1,42 @@
 # MEMORY
 
+## 2026-08-10 - Aprovisionamiento automatico por identidad de instalacion
+
+- Una PC Edge tiene UUID de instalacion independiente de `Dispositivo`. El UUID
+  no secreto vive en `config/agent.json`; el secreto aleatorio vive solo en el
+  proveedor DPAPI CurrentUser. SQLite, UI y logs no contienen ese secreto.
+- El primer login central valido de ADMINISTRADOR/OPERADOR usa el token humano
+  solo para autorizar `POST /api/v1/edge-sync/installations/provision`. El token
+  no se conserva. PostgreSQL guarda unicamente el hash del secreto tecnico.
+- SyncWorker prefiere `X-Edge-Installation-ID` + bearer tecnico y sigue activo
+  despues del logout/reinicio. El protocolo legacy Device ID/Edge Key queda como
+  fallback interno para instalaciones ya provisionadas.
+- Se agrego Alembic `e4f5a6b7c8d9` con `edge_installations`; debe desplegarse en
+  central antes de aprovisionar una instalacion nueva. No se altero
+  `RoleEnum.DISPOSITIVO` ni se exige crear/seleccionar un Dispositivo.
+- Validacion: 51 focalizadas; 155 pass/2 skip; build Vite y smoke correctos.
+
+## 2026-08-10 - Autenticacion offline derivada, sin hashes centrales
+
+- `local_auth_users` (migracion SQLite 3) conserva unicamente
+  `central_user_id`, carnet, rol ADMINISTRADOR/OPERADOR, `local_verifier` PBKDF2
+  con salt propio y fechas. El token devuelto por el login central se descarta y
+  nunca se persiste.
+- Con URL configurada, login intenta central primero. Una validacion correcta
+  renueva el verificador local; 401/403 central no cae al cache. Un error real
+  de transporte o 5xx permite verificar offline. Sin fila previa se explica que
+  hace falta un primer login con Internet.
+- Las sesiones Edge son opacas y viven en memoria del proceso; siguen activas
+  cuando cae Internet. Tras reiniciar el agente se vuelve a autenticar, pudiendo
+  usar el verificador offline. El frontend descarta sesiones locales con rol
+  USUARIO o DISPOSITIVO.
+- `ProductConfigStore.save(url)` preserva un device_id existente y no toca el
+  blob DPAPI. Configuracion ya no recibe ni muestra ID/clave; SyncWorker conserva
+  el protocolo tecnico actual. No se cambio PostgreSQL ni RoleEnum.DISPOSITIVO.
+- Validacion: 35 focalizadas; 151 pass/2 skip; verify/build/smoke correctos;
+  EXE/Setup reconstruidos e instalados. Runtime instalado confirmo SQLite v3,
+  OCR/DB READY, rechazo offline inicial y MIME/404 portable.
+
 ## 2026-08-09 - Correccion MIME portable del servidor estatico Edge
 
 - `FileResponse`/`StaticFiles` terminaban consultando `mimetypes`, que en una

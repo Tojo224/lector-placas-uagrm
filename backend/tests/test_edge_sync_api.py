@@ -11,10 +11,18 @@ from app.api.v1.edge_sync import (
     EdgeEvent,
     _ingest_event,
     ingest_media,
+    provision_installation,
     provision_device,
 )
 from app.core.security import verify_password
-from app.db.models import Acceso, Dispositivo, Escaneado, MediaTypeEnum, TipoAccesoEnum
+from app.db.models import (
+    Acceso,
+    Dispositivo,
+    EdgeInstallation,
+    Escaneado,
+    MediaTypeEnum,
+    TipoAccesoEnum,
+)
 from PIL import Image
 from starlette.datastructures import Headers, UploadFile
 
@@ -45,6 +53,34 @@ async def test_provision_returns_device_credential_once_and_stores_only_hash():
     result = await provision_device(device.id, session, None)
     assert result["credential"] != device.edge_credential_hash
     assert verify_password(result["credential"], device.edge_credential_hash)
+
+
+@pytest.mark.anyio
+async def test_staff_login_provisions_independent_installation_credential():
+    session = MemorySession()
+    installation_id = uuid4()
+    result = await provision_installation(
+        SimpleNamespace(installation_id=installation_id), session, None
+    )
+    installation = session.rows[(EdgeInstallation, installation_id)]
+    assert result["installation_id"] == str(installation_id)
+    assert result["credential"] != installation.credential_hash
+    assert verify_password(result["credential"], installation.credential_hash)
+    assert installation.is_active is True
+
+
+@pytest.mark.anyio
+async def test_installation_scan_ingestion_does_not_require_functional_device():
+    session = MemorySession()
+    event_id = uuid4()
+    event = EdgeEvent(
+        event_id=event_id, event_type="SCAN_RECORDED", schema_version=1,
+        payload={"plate": "9999ZZZ", "status": "DETECTED", "confidence": 0.9,
+                 "captured_at": datetime.now(timezone.utc).isoformat()},
+    )
+    assert await _ingest_event(session, None, event) == "ACCEPTED"
+    scan = session.rows[(Escaneado, event_id)]
+    assert scan.dispositivo_id is None
 
 
 @pytest.mark.anyio

@@ -136,3 +136,36 @@ def test_central_administration_clients_remain_separate():
     assert "centralApiClient" in central
     assert 'from "../../api/auth"' in users
     assert 'from "./axios"' in devices
+
+
+def test_edge_configuration_only_requests_central_url():
+    source = (REPO_ROOT / "frontend/src/pages/device/EdgeProvisioning.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert "central_url" in source
+    assert "device_id" not in source
+    assert "device_key" not in source
+    assert "ID del dispositivo" not in source
+    assert "Clave Edge" not in source
+
+
+def test_edge_scanner_login_allows_only_admin_and_operator():
+    routes = (REPO_ROOT / "frontend/src/routes/AppRoutes.jsx").read_text(
+        encoding="utf-8"
+    )
+    context = (REPO_ROOT / "frontend/src/context/AuthContext.jsx").read_text(
+        encoding="utf-8"
+    )
+    assert 'const EDGE_ROLES = new Set(["ADMINISTRADOR", "OPERADOR"])' in context
+    assert '<Route path="/login" element={<Login />} />' in routes
+    assert "EdgeScannerRoute" in routes
+    assert '["ADMINISTRADOR", "OPERADOR"].includes(user.rol)' in routes
+
+
+def test_central_device_role_remains_in_central_routes_and_model():
+    routes = (REPO_ROOT / "frontend/src/routes/AppRoutes.jsx").read_text(
+        encoding="utf-8"
+    )
+    models = (REPO_ROOT / "backend/app/db/models.py").read_text(encoding="utf-8")
+    assert '"DISPOSITIVO"' in routes
+    assert "DISPOSITIVO = \"DISPOSITIVO\"" in models

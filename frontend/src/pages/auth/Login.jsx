@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 
 import Loader from "../../components/Loader";
 import { useAuth } from "../../hooks/useAuth";
+import { isEdgeHosted } from "../../api/edge";
 
 function Login() {
   const { user, authLoading, signInLoading, signIn } = useAuth();
@@ -86,7 +87,9 @@ function Login() {
         </button>
 
         <p className="helper-text">
-          ¿No tienes cuenta?{" "}
+          {isEdgeHosted
+            ? <>La primera autenticación en esta PC requiere Internet. <a href="/configuracion">Configurar backend</a>.</>
+            : <>¿No tienes cuenta? </>}
         </p>
       </form>
     </main>

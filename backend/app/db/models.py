@@ -176,6 +176,22 @@ class Dispositivo(Base):
     escaneos = relationship("Escaneado", back_populates="dispositivo")
 
 
+class EdgeInstallation(Base):
+    __tablename__ = "edge_installations"
+
+    id = Column(Uuid, primary_key=True, default=uuid.uuid4)
+    credential_hash = Column(String, nullable=False)
+    credential_issued_at = Column(DateTime(timezone=True), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc), nullable=False,
+    )
+
+
 class Escaneado(Base):
     __tablename__ = "escaneados"
 

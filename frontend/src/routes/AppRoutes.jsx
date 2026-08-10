@@ -88,6 +88,15 @@ function PlateScannerRoute({ children }) {
   return children;
 }
 
+function EdgeScannerRoute({ children }) {
+  const { user, authLoading } = useAuth();
+  if (authLoading) return <Loader label="Validando acceso local..." />;
+  if (!user || !["ADMINISTRADOR", "OPERADOR"].includes(user.rol)) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+}
+
 function HomeRoute() {
   const { user, authLoading } = useAuth();
 
@@ -110,10 +119,11 @@ function AppRoutes() {
   if (isEdgeHosted) {
     return (
       <Routes>
-        <Route path="/" element={<UploadPlate />} />
-        <Route path="/subir-placa" element={<UploadPlate />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<EdgeScannerRoute><UploadPlate /></EdgeScannerRoute>} />
+        <Route path="/subir-placa" element={<EdgeScannerRoute><UploadPlate /></EdgeScannerRoute>} />
         <Route path="/configuracion" element={<EdgeProvisioning />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     );
   }

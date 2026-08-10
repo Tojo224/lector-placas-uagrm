@@ -2,13 +2,12 @@
 
 ## Aprovisionamiento de sincronizacion
 
-1. Un administrador llama una vez a
-   `POST /api/v1/edge-sync/devices/{device_id}/provision` en el backend central.
-2. La respuesta entrega `device_id` y `credential`. La credencial no puede
-   recuperarse nuevamente; volver a aprovisionar la rota.
-3. El operador abre `/configuracion`, ingresa URL, ID y credencial una sola vez.
-   El agente valida y descarga el snapshot antes de guardar la URL/ID en JSON y
-   la credencial con DPAPI CurrentUser. No se requiere `.env` en produccion.
+1. El operador configura solamente la URL central.
+2. El primer login online valido de un ADMINISTRADOR u OPERADOR autoriza el
+   alta ante `POST /api/v1/edge-sync/installations/provision`.
+3. El ID no secreto queda en `config/agent.json`; la credencial tecnica se
+   protege con DPAPI CurrentUser y el SyncWorker la usa aunque el usuario cierre
+   sesion.
 
 Las variables `EDGE_CENTRAL_URL`, `EDGE_DEVICE_ID` y `EDGE_DEVICE_KEY` quedan
 disponibles exclusivamente como puente de desarrollo/pruebas. En produccion la
@@ -86,11 +85,18 @@ escribe `SHA256SUMS.txt`. Inno Setup instala en
 `%ProgramData%\UAGRM\PlateAgent` y registra una tarea Task Scheduler ONLOGON.
 Desinstalar retira binarios y tarea, pero conserva ProgramData.
 
-La primera configuracion se abre en `http://127.0.0.1:8765/configuracion`.
-`central_url` y `device_id` se guardan en `config/agent.json`; la clave se
-protege con DPAPI CurrentUser en `config/device-key.dpapi`. El agente valida la
-credencial descargando el snapshot antes de persistirla y nunca vuelve a
-mostrarla. No se admite HTTP productivo salvo loopback para pruebas.
+La configuracion se abre en `http://127.0.0.1:8765/configuracion` y solicita
+solo `central_url`. Al primer login online se genera un ID de instalacion y el
+backend entrega una credencial tecnica independiente de `Dispositivo`. El ID se
+guarda en JSON y la clave en `config/device-key.dpapi` mediante DPAPI. Las
+instalaciones legacy con `device_id` y Edge Key se conservan y siguen siendo
+aceptadas sin exponerlas. No se admite HTTP productivo salvo loopback para
+pruebas.
+
+El primer login local de cada ADMINISTRADOR u OPERADOR valida sus credenciales
+contra el backend central. El Edge descarta el token central y genera un
+verificador PBKDF2 propio en SQLite. Los accesos posteriores pueden validarse
+offline. USUARIO y DISPOSITIVO nunca reciben un verificador local.
 
 La version 0.2.0 se define en `edge_agent/version.py` y el build la propaga a
 las propiedades del EXE, Setup, API y UI. Los artefactos actuales no tienen

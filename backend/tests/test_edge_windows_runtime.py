@@ -79,39 +79,52 @@ def test_product_config_contains_only_non_sensitive_values(tmp_path: Path):
     assert "key" not in " ".join(payload).lower()
 
 
-def test_local_provision_validates_snapshot_and_never_writes_plain_key(
+def test_provisioned_installation_identity_survives_settings_reload(
+    monkeypatch, tmp_path: Path
+):
+    installation_id = "00000000-0000-4000-8000-000000000333"
+    ProductConfigStore(tmp_path).save(
+        "https://central.example",
+        installation_id=installation_id,
+        installation_provisioned=True,
+    )
+    credential = StubCredentialProvider()
+    credential.store_device_key("installation-secret")
+    monkeypatch.setenv("EDGE_DATA_DIR", str(tmp_path))
+
+    restarted = EdgeSettings.from_env(credential)
+
+    assert restarted.installation_id == installation_id
+    assert restarted.installation_key == "installation-secret"
+    assert restarted.sync_configured() is True
+    assert "installation-secret" not in ProductConfigStore(tmp_path).path.read_text()
+
+
+def test_local_configuration_preserves_existing_technical_credentials(
     monkeypatch, tmp_path: Path
 ):
     credential = StubCredentialProvider()
-    snapshot = {
-        "version": "snapshot-1", "generated_at": "2026-08-09T00:00:00+00:00",
-        "vehicles": [], "devices": [],
-    }
-
-    class FakeAsyncClient:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *_args): return None
-        async def get(self, path):
-            assert path == "/api/v1/edge-sync/snapshot"
-            return httpx.Response(200, json=snapshot, request=httpx.Request("GET", "https://central.example" + path))
-        async def aclose(self): return None
-
-        def __init__(self, **kwargs):
-            assert kwargs["headers"]["Authorization"] == "Bearer edge-setup-key"
-
-    monkeypatch.setattr("edge_agent.app.httpx.AsyncClient", FakeAsyncClient)
+    credential.store_device_key("edge-setup-key")
+    ProductConfigStore(tmp_path).save(
+        "https://old-central.example", "00000000-0000-4000-8000-000000000001"
+    )
     app = create_edge_app(
-        EdgeSettings(data_dir=tmp_path),
+        EdgeSettings(
+            data_dir=tmp_path,
+            device_id="00000000-0000-4000-8000-000000000001",
+            device_key="edge-setup-key",
+        ),
         engine_factory=lambda _settings: object(),
         credential_provider=credential,
     )
     with TestClient(app) as client:
         response = client.post("/api/v1/edge/provision", json={
             "central_url": "https://central.example",
-            "device_id": "00000000-0000-4000-8000-000000000001",
-            "device_key": "edge-setup-key",
         })
 
     assert response.status_code == 200
+    assert response.json()["technical_credentials_preserved"] is True
     assert credential.get_device_key() == "edge-setup-key"
-    assert "edge-setup-key" not in (tmp_path / "config" / "agent.json").read_text()
+    payload = (tmp_path / "config" / "agent.json").read_text()
+    assert "edge-setup-key" not in payload
+    assert "00000000-0000-4000-8000-000000000001" in payload

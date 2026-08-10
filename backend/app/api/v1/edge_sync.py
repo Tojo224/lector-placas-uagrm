@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID
 
-from app.api.v1.auth import require_admin
+from app.api.v1.auth import require_admin, require_staff
 from app.core.security import hash_password, verify_password
 from app.db.models import (
     Acceso,
     ArchivoMultimedia,
     Dispositivo,
+    EdgeInstallation,
     Escaneado,
     EstadoEscaneoEnum,
     MediaProviderEnum,
@@ -47,6 +48,17 @@ class EdgeBatch(BaseModel):
     events: list[EdgeEvent] = Field(max_length=100)
 
 
+class InstallationProvisionRequest(BaseModel):
+    installation_id: UUID
+
+
+class EdgeSyncIdentity:
+    def __init__(self, installation: EdgeInstallation | None = None,
+                 device: Dispositivo | None = None) -> None:
+        self.installation = installation
+        self.device = device
+
+
 async def require_edge_device(
     x_edge_device_id: UUID = Header(),
     authorization: str = Header(),
@@ -65,6 +77,67 @@ async def require_edge_device(
     ):
         raise HTTPException(status_code=401, detail="Credencial Edge invalida.")
     return device
+
+
+async def require_edge_sync_identity(
+    authorization: str = Header(),
+    x_edge_installation_id: UUID | None = Header(
+        default=None, alias="X-Edge-Installation-ID"
+    ),
+    x_edge_device_id: UUID | None = Header(default=None, alias="X-Edge-Device-ID"),
+    db: AsyncSession = Depends(get_db),
+) -> EdgeSyncIdentity:
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        raise HTTPException(status_code=401, detail="Credencial Edge invalida.")
+    key = authorization[len(prefix):]
+    if x_edge_installation_id:
+        installation = await db.get(EdgeInstallation, x_edge_installation_id)
+        if (
+            installation and installation.is_active
+            and verify_password(key, installation.credential_hash)
+        ):
+            return EdgeSyncIdentity(installation=installation)
+    if x_edge_device_id:
+        device = await db.get(Dispositivo, x_edge_device_id)
+        if (
+            device and device.esta_activo and device.edge_credential_hash
+            and verify_password(key, device.edge_credential_hash)
+        ):
+            return EdgeSyncIdentity(device=device)
+    raise HTTPException(status_code=401, detail="Credencial Edge invalida.")
+
+
+@router.post("/installations/provision")
+async def provision_installation(
+    request: InstallationProvisionRequest,
+    db: AsyncSession = Depends(get_db),
+    _staff: Usuario = Depends(require_staff),
+):
+    credential = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    installation = await db.get(EdgeInstallation, request.installation_id)
+    if installation is None:
+        installation = EdgeInstallation(
+            id=request.installation_id,
+            credential_hash=hash_password(credential),
+            credential_issued_at=now,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(installation)
+    else:
+        installation.credential_hash = hash_password(credential)
+        installation.credential_issued_at = now
+        installation.is_active = True
+        installation.updated_at = now
+    await db.commit()
+    return {
+        "installation_id": str(installation.id),
+        "credential": credential,
+        "issued_at": now.isoformat(),
+    }
 
 
 @router.post("/devices/{device_id}/provision")
@@ -87,7 +160,7 @@ async def provision_device(
 @router.get("/snapshot")
 async def edge_snapshot(
     db: AsyncSession = Depends(get_db),
-    _device: Dispositivo = Depends(require_edge_device),
+    _identity: EdgeSyncIdentity = Depends(require_edge_sync_identity),
 ):
     generated_at = datetime.now(timezone.utc).isoformat()
     vehicles = list((await db.execute(select(Vehiculo).options(
@@ -118,7 +191,7 @@ def _scan_status(value: str) -> EstadoEscaneoEnum:
                 value, EstadoEscaneoEnum.ERROR)
 
 
-async def _ingest_event(db: AsyncSession, device: Dispositivo,
+async def _ingest_event(db: AsyncSession, device: Dispositivo | None,
                         event: EdgeEvent) -> str:
     payload = event.payload
     if event.schema_version != 1:
@@ -131,7 +204,7 @@ async def _ingest_event(db: AsyncSession, device: Dispositivo,
             placa_normalizada=payload.get("plate"),
             confianza=payload.get("confidence"),
             estado=_scan_status(str(payload.get("status", "DETECTED"))),
-            dispositivo_id=device.id,
+            dispositivo_id=device.id if device else None,
             creado_el=datetime.fromisoformat(payload["captured_at"]),
         ))
         await db.commit()
@@ -152,14 +225,14 @@ async def _ingest_event(db: AsyncSession, device: Dispositivo,
         scan = Escaneado(
             id=scan_id, placa_detectada=vehicle.placa,
             placa_normalizada=vehicle.placa, estado=EstadoEscaneoEnum.DETECTADO,
-            dispositivo_id=device.id, vehiculo_id=vehicle.id,
+            dispositivo_id=device.id if device else None, vehiculo_id=vehicle.id,
             creado_el=datetime.fromisoformat(payload["occurred_at"]),
         )
         db.add(scan)
         await db.flush()
     db.add(Acceso(
         id=access_id, tipo_acceso=TipoAccesoEnum(payload["direction"]),
-        ubicacion=device.ubicacion, escaneado_id=scan_id,
+        ubicacion=device.ubicacion if device else "Edge local", escaneado_id=scan_id,
         creado_el=datetime.fromisoformat(payload["occurred_at"]),
     ))
     await db.commit()
@@ -170,12 +243,12 @@ async def _ingest_event(db: AsyncSession, device: Dispositivo,
 async def ingest_events(
     batch: EdgeBatch,
     db: AsyncSession = Depends(get_db),
-    device: Dispositivo = Depends(require_edge_device),
+    identity: EdgeSyncIdentity = Depends(require_edge_sync_identity),
 ):
     results = []
     for event in batch.events:
         try:
-            status = await _ingest_event(db, device, event)
+            status = await _ingest_event(db, identity.device, event)
         except (ValueError, KeyError):
             await db.rollback()
             status = "PERMANENT_ERROR"
@@ -197,7 +270,7 @@ async def ingest_media(
     scan_id: UUID | None = Form(None),
     access_event_id: UUID | None = Form(None),
     db: AsyncSession = Depends(get_db),
-    _device: Dispositivo = Depends(require_edge_device),
+    _device: EdgeSyncIdentity = Depends(require_edge_sync_identity),
 ):
     existing = await db.get(ArchivoMultimedia, media_id)
     if existing and existing.estado == MediaStatusEnum.READY:

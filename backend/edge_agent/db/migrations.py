@@ -149,4 +149,23 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS ix_local_media_sync ON local_media(status, next_attempt_at, created_at)",
         ),
     ),
+    Migration(
+        version=3,
+        name="local_staff_auth_verifiers",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS local_auth_users (
+                central_user_id TEXT PRIMARY KEY,
+                carnet TEXT UNIQUE NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('ADMINISTRADOR', 'OPERADOR')),
+                local_verifier TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_online_auth_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_local_auth_users_carnet ON local_auth_users(carnet)",
+            "DELETE FROM local_auth_users WHERE role NOT IN ('ADMINISTRADOR', 'OPERADOR')",
+        ),
+    ),
 )

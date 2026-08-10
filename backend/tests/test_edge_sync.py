@@ -47,6 +47,36 @@ def client(handler):
 
 
 @pytest.mark.anyio
+async def test_installation_identity_authenticates_worker_without_human_session(tmp_path):
+    db = database(tmp_path)
+    observed = []
+
+    def handler(request):
+        observed.append(dict(request.headers))
+        if request.url.path.endswith("snapshot"):
+            return httpx.Response(200, json=snapshot())
+        return httpx.Response(200, json={"results": []})
+
+    configured = settings(
+        tmp_path,
+        device_id=None,
+        device_key=None,
+        installation_id="00000000-0000-4000-8000-000000000222",
+        installation_key="installation-secret",
+    )
+    async with client(handler) as http:
+        await SyncWorker(db, configured, http).run_once()
+
+    assert observed
+    assert all(
+        headers["x-edge-installation-id"] == configured.installation_id
+        and headers["authorization"] == "Bearer installation-secret"
+        and "x-edge-device-id" not in headers
+        for headers in observed
+    )
+
+
+@pytest.mark.anyio
 async def test_initial_provision_and_snapshot_renewal_are_atomic(tmp_path):
     db = database(tmp_path)
     current = {"value": snapshot("v1")}

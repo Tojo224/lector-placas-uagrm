@@ -8,6 +8,9 @@ import {
   updateProfile
 } from "../api/auth";
 import { clearSession, readSession, saveSession } from "../services/storage";
+import { getEdgeSession, isEdgeHosted, loginWithEdge, logoutFromEdge } from "../api/edge";
+
+const EDGE_ROLES = new Set(["ADMINISTRADOR", "OPERADOR"]);
 
 export const AuthContext = createContext({
   user: null,
@@ -31,11 +34,33 @@ export function AuthProvider({ children }) {
   const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
-    const session = readSession();
-    if (session?.user) {
-      setUser(session.user);
-    }
-    setAuthLoading(false);
+    const restoreSession = async () => {
+      const session = readSession();
+      if (!session?.user) {
+        setAuthLoading(false);
+        return;
+      }
+      if (!isEdgeHosted) {
+        setUser(session.user);
+        setAuthLoading(false);
+        return;
+      }
+      if (!EDGE_ROLES.has(session.user.rol)) {
+        clearSession();
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const current = await getEdgeSession();
+        if (EDGE_ROLES.has(current.user?.rol)) setUser(current.user);
+        else clearSession();
+      } catch {
+        clearSession();
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    restoreSession();
   }, []);
 
   const persistUser = (nextUser) => {
@@ -51,7 +76,9 @@ export function AuthProvider({ children }) {
     setSignInLoading(true);
 
     try {
-      const session = await loginUser(credentials);
+      const session = isEdgeHosted
+        ? await loginWithEdge(credentials)
+        : await loginUser(credentials);
       saveSession(session);
       setUser(session.user);
       return session;
@@ -61,7 +88,11 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
-    await logoutUser();
+    if (isEdgeHosted) {
+      try { await logoutFromEdge(); } catch { /* La sesión local se limpia igualmente. */ }
+    } else {
+      await logoutUser();
+    }
     clearSession();
     setUser(null);
   };

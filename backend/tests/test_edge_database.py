@@ -26,6 +26,7 @@ EXPECTED_TABLES = {
     "outbox",
     "sync_state",
     "agent_metadata",
+    "local_auth_users",
     "schema_migrations",
 }
 
@@ -59,7 +60,7 @@ def test_creates_minimal_schema_and_pragmas_from_scratch(tmp_path):
     assert diagnostics["journal_mode"] == "wal"
     assert diagnostics["foreign_keys"] is True
     assert diagnostics["busy_timeout_ms"] == 5000
-    assert diagnostics["schema_version"] == 2
+    assert diagnostics["schema_version"] == 3
 
 
 def test_migrations_are_versioned_and_idempotent(tmp_path):
@@ -73,6 +74,7 @@ def test_migrations_are_versioned_and_idempotent(tmp_path):
     assert [(row["version"], row["name"]) for row in migrations] == [
         (1, "initial_edge_operational_schema"),
         (2, "durable_media_sync_state"),
+        (3, "local_staff_auth_verifiers"),
     ]
 
 

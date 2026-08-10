@@ -10,12 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
-from uuid import UUID
 
 import httpx
 from app.services.image_processing import ImageProcessingError
 from app.services.plate_analysis import analyze_plate_bytes
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,6 +35,7 @@ from edge_agent.db import EdgeDatabase
 from edge_agent.db.repositories import ScanRepository
 from edge_agent.engine import create_ocr_engine
 from edge_agent.media_spool import MediaSpool, MediaSpoolError
+from edge_agent.local_auth import LocalAuthError, LocalAuthService
 from edge_agent.offline_access import OfflineAccessService
 from edge_agent.product_config import ProductConfigStore, validate_central_url
 from edge_agent.sync import SyncWorker
@@ -109,8 +109,18 @@ class OperationalSnapshot(BaseModel):
 
 class ProvisionRequest(BaseModel):
     central_url: str
-    device_id: str
-    device_key: str
+
+
+class LocalLoginRequest(BaseModel):
+    carnet: str
+    contrasena: str
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    prefix = "Bearer "
+    if authorization and authorization.startswith(prefix):
+        return authorization[len(prefix):].strip() or None
+    return None
 
 
 def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -164,6 +174,68 @@ def create_edge_app(
         data_dir
     )
 
+    async def replace_sync_worker(app: FastAPI, configured: EdgeSettings) -> None:
+        if app.state.sync_worker:
+            app.state.sync_worker.stop()
+            if app.state.sync_task:
+                await app.state.sync_task
+        app.state.sync_worker = None
+        app.state.sync_task = None
+        if configured.sync_configured() and app.state.database is not None:
+            app.state.sync_worker = SyncWorker(app.state.database, configured)
+            app.state.sync_task = asyncio.create_task(app.state.sync_worker.run())
+
+    async def provision_technical_identity(
+        app: FastAPI, central_url: str, human_token: str
+    ) -> None:
+        stored = product_config_store.load()
+        installation_id = product_config_store.ensure_installation_id(central_url)
+        existing_secret = product_credential_provider.get_device_key()
+        if stored.installation_provisioned and existing_secret:
+            configured = replace(
+                edge_settings,
+                central_url=central_url,
+                installation_id=installation_id,
+                installation_key=existing_secret,
+            )
+            if app.state.sync_worker is None:
+                await replace_sync_worker(app, configured)
+            return
+        try:
+            async with httpx.AsyncClient(base_url=central_url, timeout=15.0) as client:
+                response = await client.post(
+                    "/api/v1/edge-sync/installations/provision",
+                    json={"installation_id": installation_id},
+                    headers={"Authorization": f"Bearer {human_token}"},
+                )
+            response.raise_for_status()
+            payload = response.json()
+            if str(payload.get("installation_id")) != installation_id:
+                raise ValueError("Identidad de instalación central inválida.")
+            credential = str(payload.get("credential") or "").strip()
+            if not credential:
+                raise ValueError("Credencial técnica central vacía.")
+        except (httpx.HTTPError, TypeError, ValueError) as exc:
+            raise LocalAuthError(
+                "El usuario fue validado, pero no se pudo aprovisionar esta instalación.",
+                503,
+            ) from exc
+        await asyncio.to_thread(product_credential_provider.store_device_key, credential)
+        await asyncio.to_thread(
+            product_config_store.save,
+            central_url,
+            None,
+            installation_id,
+            True,
+        )
+        configured = replace(
+            edge_settings,
+            central_url=central_url,
+            installation_id=installation_id,
+            installation_key=credential,
+        )
+        await replace_sync_worker(app, configured)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.lifecycle_state = "STARTING"
@@ -182,6 +254,7 @@ def create_edge_app(
         app.state.sync_worker = None
         app.state.sync_task = None
         app.state.ocr_task = None
+        app.state.local_auth = None
         try:
             database = EdgeDatabase(
                 edge_settings.database_path(),
@@ -192,6 +265,12 @@ def create_edge_app(
                 (perf_counter() - lifespan_started) * 1000, 1
             )
             app.state.database = database
+            app.state.local_auth = LocalAuthService(
+                database,
+                on_online_validated=lambda central_url, token: provision_technical_identity(
+                    app, central_url, token
+                ),
+            )
             app.state.scan_repository = ScanRepository(database)
             app.state.offline_access = OfflineAccessService(
                 database, edge_settings.cache_max_age_hours,
@@ -343,45 +422,63 @@ def create_edge_app(
 
     @app.post("/api/v1/edge/provision")
     async def provision(request: ProvisionRequest):
-        if app.state.database is None:
-            raise HTTPException(status_code=503, detail="SQLite local no esta listo.")
         try:
             central_url = validate_central_url(request.central_url)
-            device_id = str(UUID(request.device_id))
-            device_key = request.device_key.strip()
-            if not device_key:
-                raise ValueError("La credencial Edge esta vacia.")
-            headers = {"X-Edge-Device-ID": device_id,
-                       "Authorization": f"Bearer {device_key}"}
-            async with httpx.AsyncClient(base_url=central_url, timeout=15.0,
-                                         headers=headers) as client:
-                response = await client.get("/api/v1/edge-sync/snapshot")
-                if response.status_code in {401, 403}:
-                    raise HTTPException(status_code=401,
-                                        detail="Credencial Edge invalida.")
-                response.raise_for_status()
-                snapshot = OperationalSnapshot.model_validate(response.json())
             await asyncio.to_thread(
-                apply_snapshot, app.state.database, snapshot.model_dump()
+                product_config_store.ensure_installation_id, central_url
             )
-            await asyncio.to_thread(product_credential_provider.store_device_key,
-                                    device_key)
-            await asyncio.to_thread(product_config_store.save, central_url, device_id)
-            configured = replace(edge_settings, central_url=central_url,
-                                 device_id=device_id, device_key=device_key)
-            if app.state.sync_worker is None:
-                app.state.sync_worker = SyncWorker(app.state.database, configured)
-                app.state.sync_task = asyncio.create_task(app.state.sync_worker.run())
-            return {"status": "PROVISIONED", "device_id": device_id,
-                    "snapshot_version": snapshot.version}
-        except HTTPException:
-            raise
-        except httpx.HTTPError as exc:
-            logger.warning("Aprovisionamiento central fallo: %s", type(exc).__name__)
-            raise HTTPException(status_code=503,
-                                detail="No se pudo conectar o validar el backend central.") from exc
+            stored = product_config_store.load()
+            device_key = product_credential_provider.get_device_key()
+            configured = replace(
+                edge_settings,
+                central_url=central_url,
+                installation_id=stored.installation_id,
+                installation_key=(
+                    device_key if stored.installation_provisioned else None
+                ),
+                device_id=edge_settings.device_id or stored.device_id,
+                device_key=edge_settings.device_key or device_key,
+            )
+            await replace_sync_worker(app, configured)
+            return {
+                "status": "CONFIGURED",
+                "central_url": central_url,
+                "technical_credentials_preserved": bool(
+                    (configured.installation_id and configured.installation_key)
+                    or (configured.device_id and configured.device_key)
+                ),
+            }
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/v1/edge/auth/login")
+    async def local_login(request: LocalLoginRequest):
+        if app.state.local_auth is None:
+            raise HTTPException(status_code=503, detail="Autenticación local no disponible.")
+        central_url = product_config_store.load().central_url or edge_settings.central_url
+        try:
+            result = await app.state.local_auth.login(
+                central_url, request.carnet, request.contrasena
+            )
+            return {"token": result.token, "user": result.user, "mode": result.mode}
+        except LocalAuthError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    @app.get("/api/v1/edge/auth/session")
+    async def local_session(authorization: str | None = Header(default=None)):
+        user = (
+            app.state.local_auth.session(_bearer_token(authorization))
+            if app.state.local_auth else None
+        )
+        if not user:
+            raise HTTPException(status_code=401, detail="Sesión local inválida.")
+        return {"user": user}
+
+    @app.post("/api/v1/edge/auth/logout")
+    async def local_logout(authorization: str | None = Header(default=None)):
+        if app.state.local_auth:
+            app.state.local_auth.logout(_bearer_token(authorization))
+        return {"status": "SIGNED_OUT"}
 
     @app.get("/api/v1/edge/health")
     async def health():
@@ -431,8 +528,11 @@ def create_edge_app(
             "lifecycle_state": app.state.lifecycle_state,
             "provisioned": edge_settings.sync_configured() or bool(
                 product_config_store.load().central_url
-                and product_config_store.load().device_id
                 and product_credential_provider.get_device_key()
+                and (
+                    product_config_store.load().installation_provisioned
+                    or product_config_store.load().device_id
+                )
             ),
             "ready": ready,
             "ocr_ready": ocr_ready,

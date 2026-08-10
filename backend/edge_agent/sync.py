@@ -30,8 +30,15 @@ class SyncWorker:
         self.next_attempt_at: datetime | None = None
 
     def _headers(self) -> dict[str, str]:
-        return {"X-Edge-Device-ID": str(self.settings.device_id),
-                "Authorization": f"Bearer {self.settings.device_key}"}
+        if self.settings.installation_id and self.settings.installation_key:
+            return {
+                "X-Edge-Installation-ID": str(self.settings.installation_id),
+                "Authorization": f"Bearer {self.settings.installation_key}",
+            }
+        return {
+            "X-Edge-Device-ID": str(self.settings.device_id),
+            "Authorization": f"Bearer {self.settings.device_key}",
+        }
 
     async def run(self) -> None:
         await asyncio.to_thread(self.outbox.recover_abandoned)
