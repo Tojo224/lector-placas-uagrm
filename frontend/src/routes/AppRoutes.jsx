@@ -15,6 +15,7 @@ import VehicleRegistrationRequests from "../pages/VehicleRegistrationRequests";
 import Loader from "../components/Loader";
 import { useAuth } from "../hooks/useAuth";
 import { isEdgeHosted } from "../api/edge";
+import EdgeProvisioning from "../pages/device/EdgeProvisioning";
 
 function VehiclesRoute() {
   const { user, authLoading } = useAuth();
@@ -111,6 +112,7 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<UploadPlate />} />
         <Route path="/subir-placa" element={<UploadPlate />} />
+        <Route path="/configuracion" element={<EdgeProvisioning />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );

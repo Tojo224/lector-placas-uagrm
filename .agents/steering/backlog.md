@@ -7,7 +7,11 @@
 - `EDGE-PHASE5-001` | `done` | Prioridad `critica` | Aprovisionamiento Edge, renovacion automatica de snapshot y SyncWorker Outbox idempotente | Dependencias: `EDGE-PHASE4-001`
 - `EDGE-PHASE6-001` | `done` | Prioridad `alta` | Sincronizacion asincrona de media local y Cloudinary | Dependencias: `EDGE-PHASE5-001`
 - `EDGE-PHASE7-001` | `done` | Prioridad `media` | Integracion completa del frontend con API Edge local | Dependencias: `EDGE-PHASE6-001`
-- `EDGE-PHASE8-001` | `pending` | Prioridad `critica` | Empaquetar Edge Agent y React como instalador Windows sin Python/Uvicorn manual | Dependencias: `EDGE-PHASE7-001`
+- `EDGE-PHASE8-001` | `done` | Prioridad `critica` | Empaquetar Edge Agent, modelos OCR y React como distribucion Windows onedir sin Python/Uvicorn manual | Dependencias: `EDGE-PHASE7-001`
+- `EDGE-PHASE9-001` | `done` | Prioridad `critica` | Crear UAGRMPlateAgent-Setup.exe con ACL de ProgramData, DPAPI CurrentUser e inicio automatico ONLOGON | Dependencias: `EDGE-PHASE8-001`
+- `EDGE-PERF-001` | `done` | Prioridad `critica` | Instrumentar y optimizar startup/inferencia del EXE instalado sin cambiar modelos ni precision | Dependencias: `EDGE-PHASE9-001`
+- `EDGE-SIGN-001` | `pending` | Prioridad `critica` | Firmar Authenticode EXE y Setup con certificado institucional y validar SmartScreen/antivirus | Dependencias: certificado institucional
+- `EDGE-FIELD-001` | `pending` | Prioridad `critica` | Validar instalacion en VM limpia y PC fisica de porteria con usuario operativo, camara y backend institucional | Dependencias: hardware y credencial Edge real
 
 - `AUDIT-ROTATE-001` | `pending` | Prioridad `critica` | Rotar todos los secretos presentes históricamente en Git y coordinar actualización de entornos | Dependencias: acceso Neon/Cloudinary
 - `AUDIT-MIG-001` | `done` | Prioridad `alta` | Aplicada `c2d3e4f5a6b7` en Neon; `alembic current/check` y conservación de 16 filas verificados | Dependencias: ninguna

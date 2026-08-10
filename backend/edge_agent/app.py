@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any
+from uuid import UUID
 
-from app.ai.pipeline import get_pipeline_status
+import httpx
 from app.services.image_processing import ImageProcessingError
 from app.services.plate_analysis import analyze_plate_bytes
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -20,11 +22,16 @@ from pydantic import BaseModel
 from edge_agent import __version__
 from edge_agent.cache import apply_snapshot
 from edge_agent.config import EdgeSettings
+from edge_agent.credentials import (
+    DeviceCredentialProvider,
+    default_device_credential_provider,
+)
 from edge_agent.db import EdgeDatabase
 from edge_agent.db.repositories import ScanRepository
 from edge_agent.engine import create_ocr_engine
 from edge_agent.media_spool import MediaSpool, MediaSpoolError
 from edge_agent.offline_access import OfflineAccessService
+from edge_agent.product_config import ProductConfigStore, validate_central_url
 from edge_agent.sync import SyncWorker
 
 logger = logging.getLogger(__name__)
@@ -58,6 +65,12 @@ class OperationalSnapshot(BaseModel):
     generated_at: str
     vehicles: list[SnapshotVehicle]
     devices: list[SnapshotDevice]
+
+
+class ProvisionRequest(BaseModel):
+    central_url: str
+    device_id: str
+    device_key: str
 
 
 def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -102,12 +115,21 @@ def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None)
 def create_edge_app(
     settings: EdgeSettings | None = None,
     engine_factory: Callable[[EdgeSettings], Any] = create_ocr_engine,
+    credential_provider: DeviceCredentialProvider | None = None,
 ) -> FastAPI:
     edge_settings = settings or EdgeSettings.from_env()
+    data_dir = edge_settings.resolved_data_dir()
+    product_config_store = ProductConfigStore(data_dir)
+    product_credential_provider = credential_provider or default_device_credential_provider(
+        data_dir
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.lifecycle_state = "STARTING"
         app.state.started_at = datetime.now(timezone.utc)
+        lifespan_started = perf_counter()
+        app.state.startup_timings = {}
         app.state.analysis_count = 0
         app.state.ignored_frame_count = 0
         app.state.duplicate_frame_count = 0
@@ -119,12 +141,16 @@ def create_edge_app(
         app.state.ocr_engine = None
         app.state.sync_worker = None
         app.state.sync_task = None
+        app.state.ocr_task = None
         try:
             database = EdgeDatabase(
                 edge_settings.database_path(),
                 edge_settings.sqlite_busy_timeout_ms,
             )
             await asyncio.to_thread(database.initialize)
+            app.state.startup_timings["sqlite_initialize_ms"] = round(
+                (perf_counter() - lifespan_started) * 1000, 1
+            )
             app.state.database = database
             app.state.scan_repository = ScanRepository(database)
             app.state.offline_access = OfflineAccessService(
@@ -142,17 +168,36 @@ def create_edge_app(
         except Exception as exc:
             app.state.database_error = type(exc).__name__
             logger.exception("SQLite edge no pudo inicializarse")
-        try:
-            app.state.ocr_engine = engine_factory(edge_settings)
-            logger.info("Edge OCR inicializado en modo local")
-        except Exception as exc:
-            app.state.ocr_error = type(exc).__name__
-            logger.exception("El motor OCR local no pudo inicializarse")
+        async def initialize_ocr() -> None:
+            app.state.lifecycle_state = "INITIALIZING_OCR"
+            try:
+                app.state.ocr_engine = await asyncio.to_thread(
+                    engine_factory, edge_settings
+                )
+                app.state.startup_timings.update(
+                    getattr(app.state.ocr_engine, "_edge_startup_timings", {})
+                )
+                app.state.startup_timings["lifespan_to_ready_ms"] = round(
+                    (perf_counter() - lifespan_started) * 1000, 1
+                )
+                app.state.lifecycle_state = "READY"
+                logger.info("Edge OCR inicializado en modo local")
+            except Exception as exc:
+                app.state.ocr_error = type(exc).__name__
+                app.state.lifecycle_state = "DEGRADED"
+                logger.exception("El motor OCR local no pudo inicializarse")
+
+        if edge_settings.initialize_ocr_in_background:
+            app.state.ocr_task = asyncio.create_task(initialize_ocr())
+        else:
+            await initialize_ocr()
         yield
         if app.state.sync_worker:
             app.state.sync_worker.stop()
         if app.state.sync_task:
             await app.state.sync_task
+        if app.state.ocr_task:
+            await app.state.ocr_task
         app.state.ocr_engine = None
         app.state.scan_repository = None
         app.state.database = None
@@ -256,6 +301,48 @@ def create_edge_app(
             logger.exception("No se pudo aplicar el snapshot operativo")
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.post("/api/v1/edge/provision")
+    async def provision(request: ProvisionRequest):
+        if app.state.database is None:
+            raise HTTPException(status_code=503, detail="SQLite local no esta listo.")
+        try:
+            central_url = validate_central_url(request.central_url)
+            device_id = str(UUID(request.device_id))
+            device_key = request.device_key.strip()
+            if not device_key:
+                raise ValueError("La credencial Edge esta vacia.")
+            headers = {"X-Edge-Device-ID": device_id,
+                       "Authorization": f"Bearer {device_key}"}
+            async with httpx.AsyncClient(base_url=central_url, timeout=15.0,
+                                         headers=headers) as client:
+                response = await client.get("/api/v1/edge-sync/snapshot")
+                if response.status_code in {401, 403}:
+                    raise HTTPException(status_code=401,
+                                        detail="Credencial Edge invalida.")
+                response.raise_for_status()
+                snapshot = OperationalSnapshot.model_validate(response.json())
+            await asyncio.to_thread(
+                apply_snapshot, app.state.database, snapshot.model_dump()
+            )
+            await asyncio.to_thread(product_credential_provider.store_device_key,
+                                    device_key)
+            await asyncio.to_thread(product_config_store.save, central_url, device_id)
+            configured = replace(edge_settings, central_url=central_url,
+                                 device_id=device_id, device_key=device_key)
+            if app.state.sync_worker is None:
+                app.state.sync_worker = SyncWorker(app.state.database, configured)
+                app.state.sync_task = asyncio.create_task(app.state.sync_worker.run())
+            return {"status": "PROVISIONED", "device_id": device_id,
+                    "snapshot_version": snapshot.version}
+        except HTTPException:
+            raise
+        except httpx.HTTPError as exc:
+            logger.warning("Aprovisionamiento central fallo: %s", type(exc).__name__)
+            raise HTTPException(status_code=503,
+                                detail="No se pudo conectar o validar el backend central.") from exc
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.get("/api/v1/edge/health")
     async def health():
         ocr_ready = app.state.ocr_engine is not None
@@ -271,6 +358,7 @@ def create_edge_app(
                  {"spool_bytes": 0, "disk_free_bytes": None, "low_space": True})
         return {
             "status": "ok" if ready else "degraded",
+            "lifecycle_state": app.state.lifecycle_state,
             "ready": ready,
             "ocr_ready": ocr_ready,
             "database_ready": database_ready,
@@ -279,7 +367,10 @@ def create_edge_app(
             "sync": sync,
             "media": media,
             "active_ocr_engine": "fast_alpr" if ocr_ready else "unavailable",
-            **get_pipeline_status(),
+            "supervision_available": False,
+            "camera_capture_supported": True,
+            "pipeline_mode": "FAST_ALPR_FAST_PLATE_OCR",
+            "startup_timings": app.state.startup_timings,
         }
 
     @app.get("/api/v1/edge/status")
@@ -297,6 +388,12 @@ def create_edge_app(
                  {"spool_bytes": 0, "disk_free_bytes": None, "low_space": True})
         return {
             "status": "running",
+            "lifecycle_state": app.state.lifecycle_state,
+            "provisioned": edge_settings.sync_configured() or bool(
+                product_config_store.load().central_url
+                and product_config_store.load().device_id
+                and product_credential_provider.get_device_key()
+            ),
             "ready": ready,
             "ocr_ready": ocr_ready,
             "ocr_error": app.state.ocr_error,
@@ -317,6 +414,7 @@ def create_edge_app(
             ),
             "network_mode": sync["network"],
             "bind_host": edge_settings.host,
+            "startup_timings": app.state.startup_timings,
         }
 
     @app.get("/api/v1/edge/version")

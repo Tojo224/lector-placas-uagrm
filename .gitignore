@@ -8,6 +8,7 @@ __pycache__/
 backend/.venv/
 backend/__pycache__/
 backend/.runtime/
+backend/dist/
 backend/.pytest_cache/
 backend/uploads/
 backend/.git-legacy-backend/

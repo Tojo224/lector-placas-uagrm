@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Sequence
 
-from app.ai.pipeline import OCRPipelineConfig, analyze_plate
+from app.ai.ocr_types import OCRPipelineConfig
 from fastapi.concurrency import run_in_threadpool
 
 
@@ -23,6 +23,8 @@ async def analyze_plate_bytes(
     config: OCRPipelineConfig | None = None,
 ) -> tuple[dict[str, Any], float]:
     """Run the existing CPU-bound OCR pipeline outside the event loop."""
+    from app.ai.pipeline import analyze_plate
+
     started_at = perf_counter()
     result = await run_in_threadpool(
         analyze_plate, image_bytes, realtime, plate_engine, config

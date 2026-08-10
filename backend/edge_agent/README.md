@@ -6,17 +6,13 @@
    `POST /api/v1/edge-sync/devices/{device_id}/provision` en el backend central.
 2. La respuesta entrega `device_id` y `credential`. La credencial no puede
    recuperarse nuevamente; volver a aprovisionar la rota.
-3. La instalacion configura fuera de SQLite:
+3. El operador abre `/configuracion`, ingresa URL, ID y credencial una sola vez.
+   El agente valida y descarga el snapshot antes de guardar la URL/ID en JSON y
+   la credencial con DPAPI CurrentUser. No se requiere `.env` en produccion.
 
-```text
-EDGE_CENTRAL_URL=https://backend.example.edu
-EDGE_DEVICE_ID=<uuid del dispositivo>
-EDGE_DEVICE_KEY=<credencial emitida>
-```
-
-En produccion, `EDGE_CENTRAL_URL` debe usar HTTPS. El empaquetado posterior debe
-proteger `EDGE_DEVICE_KEY` mediante mecanismos de Windows; esta fase no incluye
-el instalador.
+Las variables `EDGE_CENTRAL_URL`, `EDGE_DEVICE_ID` y `EDGE_DEVICE_KEY` quedan
+disponibles exclusivamente como puente de desarrollo/pruebas. En produccion la
+URL debe usar HTTPS.
 
 Valores operativos opcionales:
 
@@ -51,3 +47,51 @@ Las evidencias se convierten a WebP y se almacenan bajo `spool/access/YYYY/MM`
 dentro de `EDGE_DATA_DIR`. SQLite conserva solamente ruta relativa, checksum y
 estado. Un archivo confirmado por el backend no se elimina todavía; la política
 de retención pertenece a una fase posterior.
+
+## Distribucion Windows onedir
+
+El build de produccion se genera desde la raiz con:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backend/scripts/build-windows-onedir.ps1
+```
+
+El resultado queda en
+`backend/dist/windows/UAGRMPlateAgent/UAGRMPlateAgent.exe`, acompañado por la
+carpeta `runtime`. El operador copia la carpeta completa y ejecuta solamente el
+EXE; no necesita Python, Uvicorn, Node ni terminal de desarrollo. La interfaz
+queda disponible en `http://127.0.0.1:8765`.
+
+El build valida por SHA-256 e incluye el detector YOLOv9, el OCR CCT XS v2 y su
+configuracion. En ejecucion se usan rutas directas bajo `runtime/resources` y se
+fuerza el modo offline. Los datos mutables nunca se escriben junto al EXE: por
+defecto viven en `%ProgramData%\UAGRM\PlateAgent` y los logs rotativos en su
+subdirectorio `logs`.
+
+`EDGE_DEVICE_KEY` es solamente un puente de desarrollo. El instalador productivo
+usa `WindowsDpapiCredentialProvider`, sin guardar la clave en SQLite, JSON ni un
+archivo `.env`.
+
+## Instalador productivo
+
+El pipeline completo se ejecuta con:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File backend/scripts/build-windows-installer.ps1
+```
+
+Genera `backend/dist/windows/UAGRMPlateAgent-Setup.exe`, conserva el onedir y
+escribe `SHA256SUMS.txt`. Inno Setup instala en
+`%ProgramFiles%\UAGRM\PlateAgent`, concede `Modify` a usuarios sobre
+`%ProgramData%\UAGRM\PlateAgent` y registra una tarea Task Scheduler ONLOGON.
+Desinstalar retira binarios y tarea, pero conserva ProgramData.
+
+La primera configuracion se abre en `http://127.0.0.1:8765/configuracion`.
+`central_url` y `device_id` se guardan en `config/agent.json`; la clave se
+protege con DPAPI CurrentUser en `config/device-key.dpapi`. El agente valida la
+credencial descargando el snapshot antes de persistirla y nunca vuelve a
+mostrarla. No se admite HTTP productivo salvo loopback para pruebas.
+
+La version 0.2.0 se define en `edge_agent/version.py` y el build la propaga a
+las propiedades del EXE, Setup, API y UI. Los artefactos actuales no tienen
+firma Authenticode y pueden mostrar advertencias de SmartScreen.

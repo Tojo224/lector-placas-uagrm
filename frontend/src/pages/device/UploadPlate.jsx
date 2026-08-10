@@ -781,7 +781,7 @@ function UploadPlate() {
               {edgeState.connected ? "Edge Agent conectado" : "Edge Agent desconectado"}
             </strong>
             <span className="muted-text" style={{ marginLeft: "0.75rem" }}>
-              OCR {edgeState.health?.ocr_ready ? "listo" : "no listo"}
+              OCR {edgeState.health?.lifecycle_state === "INITIALIZING_OCR" ? "inicializando" : edgeState.health?.ocr_ready ? "listo" : "no listo"}
             </span>
           </div>
           <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -793,6 +793,11 @@ function UploadPlate() {
         {!edgeState.connected && (
           <p className="error-text" style={{ margin: "0.6rem 0 0" }}>
             El scanner local no está disponible. No existe fallback hacia Railway o Neon.
+          </p>
+        )}
+        {edgeState.connected && edgeState.status?.provisioned === false && (
+          <p className="error-text" style={{ margin: "0.6rem 0 0" }}>
+            Esta instalación aún no está provisionada. <a href="/configuracion"><u>Abrir configuración inicial</u></a>.
           </p>
         )}
         {edgeState.connected && edgeState.status?.sync?.network !== "online" && (

@@ -1,5 +1,90 @@
 # MEMORY
 
+## 2026-08-09 - Perfil y optimizacion del EXE instalado 0.2.0
+
+- El baseline del EXE instalado fue API 30,923 ms, React 31,205 ms y READY
+  31,297 ms. API->READY era solo 373 ms: el cuello estaba antes del lifespan,
+  no en la creacion de sesiones ONNX.
+- `OCRPipelineConfig` se movio a un modulo liviano y `plate_analysis` carga el
+  pipeline de forma diferida. En Edge las anotaciones estaticas usan OpenCV; el
+  backend central conserva Supervision. No se cambiaron detector, reconocedor,
+  pesos, providers, thresholds ni validadores.
+- La carga OCR se ejecuta fuera del hilo HTTP y health/status exponen tiempos.
+  Una ejecucion representativa midio imports OCR 462 ms, detector 182 ms,
+  FastPlateOCR 99 ms, sesiones ONNX 276 ms y OCR total 744 ms.
+- PyInstaller excluye del producto Edge SciPy, Supervision, Matplotlib,
+  RF-DETR/CLIP y servicios de color/tipo. Una reinstalacion limpia fue necesaria
+  porque una actualizacion Inno sobre el directorio anterior no retiro archivos
+  obsoletos. El producto limpio ocupa 223.2 MiB; el onedir puro 218.8 MiB.
+- En arranques normales instalados: API 1.35-1.45 s, React 1.47-1.54 s y READY
+  1.87-2.19 s. Justo despues de una instalacion limpia, Windows empleo 13.1 s
+  antes del lifespan del EXE no firmado, aunque OCR interno tardo 728 ms; es
+  consistente con inspeccion/reputacion antivirus y requiere Authenticode.
+- Una imagen sintetica con placa fue DETECTED por el EXE instalado. Primera
+  peticion 70-94 ms, calientes 67-94 ms promedio (minimo observado 61.8 ms) y
+  confirmacion completa 80-106 ms. RAM estable ~156 MiB, frente a 218 MiB del
+  baseline. Validacion: 135 pass/2 skip, verify/build/smoke correctos.
+
+## 2026-08-09 - Instalador productivo Windows 0.2.0
+
+- Inno Setup 6.7.3 genera `UAGRMPlateAgent-Setup.exe` de 99,074,482 bytes desde
+  el onedir. Instala en Program Files y no declara ProgramData como contenido
+  desinstalable, por lo que actualizaciones/desinstalaciones preservan SQLite,
+  Outbox, spool, configuracion, DPAPI y logs.
+- ACL instalada: BUILTIN\Users `Modify/Synchronize` sobre
+  `%ProgramData%\UAGRM\PlateAgent` y subdirectorios. La tarea ONLOGON se crea
+  mediante COM Task Scheduler, modo interactivo limitado, y se elimina al
+  desinstalar. `schtasks.exe` fue descartado porque el Windows administrado lo
+  bloqueaba desde Setup.
+- `ProductConfigStore` guarda solo URL central y device ID. La credencial usa
+  `CryptProtectData/CryptUnprotectData` con alcance CurrentUser y escritura
+  atomica. Aprovisionamiento valida UUID, HTTPS (HTTP solo loopback), credencial
+  y snapshot antes de guardar y arrancar SyncWorker.
+- OCR se inicializa en tarea de fondo en ejecucion productiva: API/UI aparecen
+  con `INITIALIZING_OCR` y cambian a READY/DEGRADED. No se cambio el pipeline.
+- Prueba real del EXE instalado contra central local: PROVISIONED, snapshot
+  `setup-test`, `agent.json` sin secreto y blob DPAPI de 280 bytes sin texto
+  recuperable. EXE y Setup reportan ProductVersion 0.2.0.
+- Instalacion limpia y actualizaciones correctas. Desinstalar retiro Program
+  Files y tarea, con ProgramData y sus 3 archivos intactos; reinstalar reutilizo
+  ProgramData y recreo la tarea. No hubo VM ni reinicio fisico.
+- Hash final Setup:
+  `72dfe4d8052a6ed9f384e024abbc072267d901a74c6987d0c92121bc67b8bf9f`.
+  Ambos artefactos permanecen sin Authenticode y requieren firma institucional.
+- Validacion final: 135 pass/2 skip, verificador completo, build Vite, smoke
+  central y `git diff --check` correctos.
+
+## 2026-08-09 - Primera distribucion Windows onedir
+
+- Se eligio PyInstaller 6.16 frente a Nuitka por sus hooks maduros para el stack
+  dinamico CPython/ONNX Runtime/OpenCV y por no requerir toolchain C en el host
+  de build. La primera entrega permanece `onedir`, no `onefile`.
+- El build incluye exclusivamente los modelos activos: detector
+  `yolo-v9-t-384-license-plates-end2end` (ONNX 7,771,218 bytes), OCR
+  `cct-xs-v2-global-model` (ONNX 3,344,292 bytes) y su YAML (1,725 bytes). Un
+  manifiesto versionado valida sus SHA-256 antes de empaquetar.
+- En modo frozen los recursos se resuelven desde `sys._MEIPASS`; el OCR recibe
+  rutas locales directas y no usa los caches del perfil ni descarga inicial.
+  React se resuelve de la misma raiz y conserva fallback para `/subir-placa`.
+- Los datos mutables se resuelven fuera del programa en
+  `%ProgramData%\UAGRM\PlateAgent`. Los logs usan rotacion 5 MiB por archivo y
+  cinco respaldos. Un mutex `Local\\UAGRMPlateAgent` evita dos procesos.
+- `DeviceCredentialProvider` separa la obtencion de `EDGE_DEVICE_KEY`; el
+  proveedor de entorno solo es puente de desarrollo/aprovisionamiento. El
+  instalador debe implementar DPAPI o Credential Manager, sin `.env` productivo.
+- La primera ejecucion empaquetada descubrio un hidden import de SciPy omitido;
+  se agrego explicitamente y el segundo build arranco correctamente.
+- Validacion real: distribucion 318.6 MiB copiada a `%TEMP%`, cwd
+  `C:\Windows\Temp`, PATH limitado a System32, HF/Transformers offline, OCR
+  `ready=true`, inferencia HTTP 200, React `/` y `/subir-placa` 200, SQLite de
+  143,360 bytes conservado tras reinicio y segunda instancia con exit code 2.
+  Los logs no mostraron intentos de descarga. Suite: 132 pass/2 skip; verificador,
+  build Vite y smoke central correctos.
+- Riesgos pendientes: el EXE no tiene firma Authenticode y puede activar
+  SmartScreen/antivirus reputacional; no hubo una VM Windows limpia disponible.
+  El instalador debe crear/asegurar ACL de ProgramData, proteger credenciales,
+  registrar inicio automatico y firmar EXE/Setup.
+
 ## 2026-08-09 - Edge Agent Fase 7
 
 - `frontend/src/api/axios.js` queda como cliente central para autenticacion,

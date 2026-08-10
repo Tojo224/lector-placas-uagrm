@@ -4,7 +4,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.ai.pipeline import OCRPipelineConfig
+from app.ai.ocr_types import OCRPipelineConfig
+from edge_agent.credentials import (
+    DeviceCredentialProvider,
+    default_device_credential_provider,
+)
+from edge_agent.product_config import ProductConfigStore
+from edge_agent.runtime import resource_path
 
 
 def _optional_int(name: str) -> int | None:
@@ -53,6 +59,7 @@ class EdgeSettings:
     media_max_upload_bytes: int = 5 * 1024 * 1024
     media_min_free_bytes: int = 100 * 1024 * 1024
     frontend_dir: Path | None = None
+    initialize_ocr_in_background: bool = False
     ui_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "https://127.0.0.1:5173",
@@ -61,10 +68,15 @@ class EdgeSettings:
     )
 
     @classmethod
-    def from_env(cls) -> EdgeSettings:
+    def from_env(
+        cls, credential_provider: DeviceCredentialProvider | None = None
+    ) -> EdgeSettings:
         host = os.getenv("EDGE_HOST", "127.0.0.1").strip()
         if host != "127.0.0.1":
             raise ValueError("EDGE_HOST debe ser 127.0.0.1 en esta fase.")
+        data_dir = default_data_dir()
+        product_config = ProductConfigStore(data_dir).load()
+        provider = credential_provider or default_device_credential_provider(data_dir)
         return cls(
             host=host,
             port=int(os.getenv("EDGE_PORT", "8765")),
@@ -88,7 +100,7 @@ class EdgeSettings:
             roi_y=_optional_int("EDGE_OCR_ROI_Y"),
             roi_width=_optional_int("EDGE_OCR_ROI_WIDTH"),
             roi_height=_optional_int("EDGE_OCR_ROI_HEIGHT"),
-            data_dir=default_data_dir(),
+            data_dir=data_dir,
             sqlite_busy_timeout_ms=int(
                 os.getenv("EDGE_SQLITE_BUSY_TIMEOUT_MS", "5000")
             ),
@@ -96,9 +108,11 @@ class EdgeSettings:
             duplicate_cooldown_seconds=int(
                 os.getenv("EDGE_DUPLICATE_COOLDOWN_SECONDS", "30")
             ),
-            central_url=os.getenv("EDGE_CENTRAL_URL", "").strip() or None,
-            device_id=os.getenv("EDGE_DEVICE_ID", "").strip() or None,
-            device_key=os.getenv("EDGE_DEVICE_KEY", "").strip() or None,
+            central_url=(os.getenv("EDGE_CENTRAL_URL", "").strip()
+                         or product_config.central_url),
+            device_id=(os.getenv("EDGE_DEVICE_ID", "").strip()
+                       or product_config.device_id),
+            device_key=provider.get_device_key(),
             snapshot_refresh_seconds=int(os.getenv("EDGE_SNAPSHOT_REFRESH_SECONDS", "900")),
             sync_poll_seconds=float(os.getenv("EDGE_SYNC_POLL_SECONDS", "5")),
             sync_timeout_seconds=float(os.getenv("EDGE_SYNC_TIMEOUT_SECONDS", "10")),
@@ -119,6 +133,9 @@ class EdgeSettings:
                     "http://localhost:5173,https://localhost:5173",
                 ).split(",") if origin.strip()
             ),
+            initialize_ocr_in_background=os.getenv(
+                "EDGE_BACKGROUND_OCR_INIT", "1"
+            ).strip().lower() not in {"0", "false", "no"},
         )
 
     def sync_configured(self) -> bool:
@@ -136,7 +153,7 @@ class EdgeSettings:
     def resolved_frontend_dir(self) -> Path:
         if self.frontend_dir:
             return self.frontend_dir.expanduser().resolve()
-        return (Path(__file__).resolve().parents[2] / "frontend" / "dist").resolve()
+        return resource_path("frontend", "dist")
 
     def pipeline_config(self) -> OCRPipelineConfig:
         return OCRPipelineConfig(
@@ -145,4 +162,5 @@ class EdgeSettings:
             roi_y=self.roi_y,
             roi_width=self.roi_width,
             roi_height=self.roi_height,
+            use_supervision_annotations=False,
         )

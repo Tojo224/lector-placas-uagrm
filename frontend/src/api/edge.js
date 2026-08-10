@@ -46,4 +46,9 @@ export async function getEdgeVersion() {
   return data;
 }
 
+export async function provisionEdge(payload) {
+  const { data } = await edgeApiClient.post("/provision", payload, { timeout: 30_000 });
+  return data;
+}
+
 export { edgeBaseURL, isEdgeHosted };

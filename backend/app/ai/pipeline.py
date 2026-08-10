@@ -7,7 +7,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-import supervision as sv
+from app.ai.ocr_types import OCRPipelineConfig
 from app.ai.validators import (
     is_blocklisted,
     normalize_plate_text,
@@ -22,9 +22,6 @@ MIN_CANDIDATE_LENGTH = 4
 MAX_CANDIDATE_LENGTH = 10
 TARGET_PLATE_LENGTH = 7
 
-box_annotator = sv.BoxAnnotator(thickness=2, color_lookup=sv.ColorLookup.INDEX)
-label_annotator = sv.LabelAnnotator(text_scale=0.5, color_lookup=sv.ColorLookup.INDEX)
-
 
 @dataclass(frozen=True)
 class OCRCandidate:
@@ -34,15 +31,6 @@ class OCRCandidate:
     xyxy: np.ndarray
     valid_format: bool
     score: float
-
-
-@dataclass(frozen=True)
-class OCRPipelineConfig:
-    confidence_threshold: float = 0.55
-    roi_x: int | None = None
-    roi_y: int | None = None
-    roi_width: int | None = None
-    roi_height: int | None = None
 
 
 def default_pipeline_config() -> OCRPipelineConfig:
@@ -193,10 +181,35 @@ def _analyze_with_fast_alpr(
     }
     if realtime:
         return result
-    selected_detection = sv.Detections(xyxy=np.asarray([selected.xyxy], dtype=np.float32), confidence=np.asarray([combined_confidence], dtype=np.float32), data={"class_name": np.asarray([selected.normalized_text])})
-    crop = sv.crop_image(image=image, xyxy=selected.xyxy)
-    annotated = box_annotator.annotate(scene=image.copy(), detections=selected_detection)
-    annotated = label_annotator.annotate(scene=annotated, detections=selected_detection, labels=[f"{selected.normalized_text} ({combined_confidence:.0%})"])
+    if config.use_supervision_annotations:
+        import supervision as sv
+
+        detections = sv.Detections(
+            xyxy=np.asarray([selected.xyxy], dtype=np.float32),
+            confidence=np.asarray([combined_confidence], dtype=np.float32),
+            data={"class_name": np.asarray([selected.normalized_text])},
+        )
+        crop = sv.crop_image(image=image, xyxy=selected.xyxy)
+        annotated = sv.BoxAnnotator(
+            thickness=2, color_lookup=sv.ColorLookup.INDEX
+        ).annotate(scene=image.copy(), detections=detections)
+        annotated = sv.LabelAnnotator(
+            text_scale=0.5, color_lookup=sv.ColorLookup.INDEX
+        ).annotate(
+            scene=annotated,
+            detections=detections,
+            labels=[f"{selected.normalized_text} ({combined_confidence:.0%})"],
+        )
+    else:
+        x1, y1, x2, y2 = (int(value) for value in selected.xyxy)
+        crop = image[max(0, y1):max(0, y2), max(0, x1):max(0, x2)]
+        annotated = image.copy()
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (160, 64, 160), 2)
+        cv2.putText(
+            annotated, f"{selected.normalized_text} ({combined_confidence:.0%})",
+            (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+            (160, 64, 160), 1, cv2.LINE_AA,
+        )
     result["annotated_image"] = _encode_image(annotated)
     result["plate_crop"] = _encode_image(crop) if crop.size else None
     return result

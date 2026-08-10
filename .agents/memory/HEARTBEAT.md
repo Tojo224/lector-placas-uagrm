@@ -1,5 +1,75 @@
 # HEARTBEAT
 
+## Estado vigente - 2026-08-09 - Optimizacion startup/inferencia 0.2.0
+
+- **Foco**: medir y reducir exclusivamente arranque e inferencia del EXE
+  instalado, sin cambiar modelos, umbrales ni reglas operativas.
+- **Completado**:
+  - Health/status publican lifecycle y tiempos internos de SQLite, imports OCR,
+    detector, FastPlateOCR, sesiones ONNX y READY.
+  - API/React arrancan antes de la carga OCR; el scanner ve
+    `INITIALIZING_OCR` hasta READY.
+  - El runtime Edge ya no empaqueta ni importa SciPy, Supervision, Matplotlib,
+    RF-DETR, CLIP ni analisis de color/tipo. El backend central los conserva.
+  - La distribucion limpia bajo Program Files bajo de 318.6 a 223.2 MiB.
+- **Medicion instalada**: antes API 30.9 s/READY 31.3 s; despues, arranque
+  recurrente API 1.35-1.45 s, React 1.47-1.54 s y READY 1.87-2.19 s. La primera
+  ejecucion inmediatamente posterior a instalar fue 13.1 s por el tramo externo
+  previo al lifespan del EXE sin firma; OCR interno fue solo 0.73 s.
+- **Inferencia real**: placa sintetica detectada; primera 70-94 ms, caliente
+  67-94 ms promedio y captura confirmada 80-106 ms extremo a extremo.
+- **Validado**: EXE instalado limpio, 135 pass/2 skip, verificador completo,
+  build Vite, smoke central y `git diff --check`.
+- **Riesgo vigente**: firma Authenticode/reputacion antivirus necesaria para
+  reducir o eliminar la penalizacion del primer lanzamiento tras instalar.
+
+## Estado vigente - 2026-08-09 - Instalador Windows 0.2.0
+
+- **Foco**: primera instalacion productiva `UAGRMPlateAgent-Setup.exe`, sin
+  auto-update ni Windows Service.
+- **Completado**:
+  - Inno Setup 6.7.3 instala el onedir en Program Files, crea accesos Inicio,
+    aplica ACL Users/Modify a ProgramData y registra Task Scheduler ONLOGON por
+    COM nativo para el usuario operativo.
+  - Configuracion no sensible vive en `config/agent.json`; la clave Edge usa
+    DPAPI CurrentUser en un archivo binario y nunca SQLite, logs o JSON.
+  - Vista `/configuracion` valida credencial/snapshot antes de persistir y activa
+    SyncWorker. Health/UI exponen INITIALIZING_OCR mientras OCR carga en segundo
+    plano.
+  - Version unica 0.2.0 se propaga al EXE, Setup, API y UI; build completo genera
+    onedir, Setup y SHA256SUMS.
+- **Validado**: instalacion limpia, tres actualizaciones, desinstalacion y
+  reinstalacion reales; ProgramData sobrevivio 3/3 archivos; tarea ONLOGON y
+  accesos Inicio correctos; provisioning real contra central local produjo
+  DPAPI opaco de 280 bytes; EXE instalado funciono sin Python/Node con datos
+  temporales; 135 pass/2 skip, verify, Vite, smoke y diff-check correctos.
+- **Limites**: Setup/EXE no firmados; no hubo VM limpia, reinicio fisico ni
+  credencial/backend institucional. La identidad sandbox no pertenece a
+  BUILTIN\Users, por lo que ProgramData se valido por ACL/instalador y el EXE
+  con ruta de datos temporal equivalente.
+
+## Estado vigente - 2026-08-09 - Distribucion Windows onedir
+
+- **Foco**: primera distribucion productiva `UAGRMPlateAgent.exe`, sin instalador
+  ni auto-update.
+- **Completado**:
+  - PyInstaller 6.16 genera un `onedir` autocontenido con runtime CPython 3.12,
+    ONNX Runtime/OpenCV, build React y los tres artefactos OCR verificados por
+    SHA-256.
+  - El EXE usa modelos por rutas empaquetadas directas, fuerza HF/Transformers
+    offline, sirve React/API en `127.0.0.1:8765` e impide una segunda instancia
+    mediante mutex de Windows.
+  - SQLite, spool, runtime mutable y logs rotativos quedan fuera del binario en
+    `%ProgramData%\UAGRM\PlateAgent`; existe un limite de credenciales preparado
+    para DPAPI/Credential Manager sin persistir claves en SQLite.
+- **Validado**: onedir real de 318.6 MiB; OCR real y React correctos con Python
+  fuera de PATH, desde una copia en `%TEMP%`, backend de modelos offline y cero
+  descargas; SQLite persistio tras reinicio; segunda instancia salio con codigo
+  2; 132 pass/2 skip, verificador, build Vite y smoke central correctos.
+- **Limite vigente**: EXE sin firma Authenticode; no se probo VM limpia ni
+  hardware real. Instalador, ACL de ProgramData, DPAPI, inicio automatico,
+  firma y auto-update pertenecen a la siguiente fase.
+
 ## Estado vigente - 2026-08-09 - Edge Agent Fase 7
 
 - **Foco**: scanner React local-first servido por Edge, sin fallback OCR central.
