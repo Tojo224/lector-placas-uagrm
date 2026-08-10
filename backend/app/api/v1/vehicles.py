@@ -274,6 +274,7 @@ async def create_vehicle(vehicle_in: VehiculoCreate, db: AsyncSession = Depends(
     new_vehicle = Vehiculo(
         placa=vehicle_in.placa.upper().strip(),
         color=vehicle_in.color.strip(),
+        color_hex=vehicle_in.color_hex,
         marca_id=vehicle_in.marca_id,
         tipo_vehiculo_id=vehicle_in.tipo_vehiculo_id,
         propietario_usuario_id=vehicle_in.propietario_usuario_id,

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 from app.ai.pipeline import get_pipeline_status
+from app.ai.validators import validate_bolivian_plate
 from app.api.v1.auth import require_scanner, require_staff
 from app.config.settings import settings
 from app.core.limiter import limiter
@@ -70,6 +71,7 @@ async def analyze_plate_endpoint(
     file: UploadFile = File(...), 
     realtime: bool = False,
     dispositivo_id: str | None = Form(None),
+    placa_sugerida: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_scanner)
 ):
@@ -321,24 +323,48 @@ async def analyze_plate_endpoint(
         try:
             await db.flush()
             # El polling nunca persiste evidencias ni crea solicitudes.
-            if (not realtime and status_val == "DETECTED" and normalized and
-                    result_dict.get("is_valid_bolivian_format", False) and
-                    vehicle is None):
+            target_plate = None
+            if placa_sugerida:
+                target_plate = placa_sugerida.replace("-", "").replace(" ", "").upper().strip()
+            elif normalized:
+                target_plate = normalized
+
+            is_valid_format = False
+            if target_plate:
+                is_valid_format = validate_bolivian_plate(target_plate)
+
+            if not realtime and target_plate and is_valid_format and vehicle is None:
                 pending = await db.scalar(select(SolicitudRegistroVehiculo).where(
-                    SolicitudRegistroVehiculo.placa_sugerida == normalized,
+                    SolicitudRegistroVehiculo.placa_sugerida == target_plate,
                     SolicitudRegistroVehiculo.estado == SolicitudRegistroEstadoEnum.PENDING,
                 ))
-                if not pending:
-                    processed = await run_in_threadpool(ImageProcessingService().process, image_bytes, MediaTypeEnum.VEHICLE_REGISTRATION.value)
-                    uploaded = await run_in_threadpool(CloudinaryStorage().upload, processed.content, MediaTypeEnum.VEHICLE_REGISTRATION.value)
-                    media = ArchivoMultimedia(proveedor=MediaProviderEnum.CLOUDINARY, tipo=MediaTypeEnum.VEHICLE_REGISTRATION, estado=MediaStatusEnum.READY, asset_id=uploaded.asset_id, public_id=uploaded.public_id, resource_type=uploaded.resource_type, delivery_type=uploaded.delivery_type, formato=uploaded.format, ancho=uploaded.width, alto=uploaded.height, peso_bytes=uploaded.bytes, intentos=1)
-                    db.add(media); await db.flush()
+                processed = await run_in_threadpool(ImageProcessingService().process, image_bytes, MediaTypeEnum.VEHICLE_REGISTRATION.value)
+                uploaded = await run_in_threadpool(CloudinaryStorage().upload, processed.content, MediaTypeEnum.VEHICLE_REGISTRATION.value)
+                media = ArchivoMultimedia(proveedor=MediaProviderEnum.CLOUDINARY, tipo=MediaTypeEnum.VEHICLE_REGISTRATION, estado=MediaStatusEnum.READY, asset_id=uploaded.asset_id, public_id=uploaded.public_id, resource_type=uploaded.resource_type, delivery_type=uploaded.delivery_type, formato=uploaded.format, ancho=uploaded.width, alto=uploaded.height, peso_bytes=uploaded.bytes, intentos=1)
+                db.add(media); await db.flush()
+                
+                if pending:
+                    pending.escaneado_id = scan.id
+                    pending.imagen_id = media.id
+                    pending.confianza_placa = scan.confianza or 0.0
+                    pending.color_sugerido = color_result.color_sugerido if color_result else "DESCONOCIDO"
+                    pending.color_hex = color_result.color_hex if color_result else None
+                    pending.confianza_color = color_result.confianza_color if color_result else 0.0
+                    pending.metodo_color = color_result.metodo_color if color_result else "DESCONOCIDO"
+                    pending.tipo_sugerido_id = type_result.tipo_sugerido_id
+                    pending.confianza_tipo = type_result.confianza_tipo
+                    pending.metodo_tipo = type_result.metodo_tipo
+                    pending.creado_el = datetime.now(timezone.utc)
+                    pending.creado_por_usuario_id = current_user.id
+                    solicitud_id = pending.id
+                else:
                     solicitud = SolicitudRegistroVehiculo(
                         escaneado_id=scan.id,
                         imagen_id=media.id,
-                        placa_sugerida=normalized,
+                        placa_sugerida=target_plate,
                         confianza_placa=scan.confianza or 0.0,
                         color_sugerido=color_result.color_sugerido if color_result else "DESCONOCIDO",
+                        color_hex=color_result.color_hex if color_result else None,
                         confianza_color=color_result.confianza_color if color_result else 0.0,
                         metodo_color=color_result.metodo_color if color_result else "DESCONOCIDO",
                         tipo_sugerido_id=type_result.tipo_sugerido_id,
@@ -348,8 +374,6 @@ async def analyze_plate_endpoint(
                         creado_por_usuario_id=current_user.id,
                     )
                     db.add(solicitud); await db.flush(); solicitud_id = solicitud.id
-                else:
-                    solicitud_id = pending.id
             await db.commit()
         except (ImageProcessingError, StorageError, SQLAlchemyError):
             await db.rollback()
@@ -368,9 +392,9 @@ async def analyze_plate_endpoint(
     # Mapeo de la respuesta
     response = PlateAnalysisResponse(
         estado="DETECTADO" if result_dict.get("status") == "DETECTED" else ("BAJA_CONFIANZA" if result_dict.get("status") == "LOW_CONFIDENCE" else result_dict.get("status")),
-        placa_detectada=result_dict.get("detected_plate"),
-        placa_normalizada=result_dict.get("normalized_plate"),
-        es_formato_valido=result_dict.get("is_valid_bolivian_format", False),
+        placa_detectada=result_dict.get("detected_plate") or placa_sugerida,
+        placa_normalizada=result_dict.get("normalized_plate") or target_plate,
+        es_formato_valido=result_dict.get("is_valid_bolivian_format", False) or is_valid_format,
         confianza=result_dict.get("combined_confidence"),
         ruta_imagen=result_dict.get("annotated_image") or result_dict.get("plate_crop"),
         plate_bbox=result_dict.get("plate_bbox"),

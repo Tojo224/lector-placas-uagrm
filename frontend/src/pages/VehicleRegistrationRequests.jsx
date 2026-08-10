@@ -4,8 +4,37 @@ import Loader from "../components/Loader";
 import { getVehicleRegistrationRequests, rejectVehicleRegistrationRequest, approveVehicleRegistrationRequest, getMediaUrl, getBrands, getVehicleTypes } from "../api/plates";
 import { listUsers } from "../api/auth";
 import SearchBar from "../components/SearchBar";
+import Pagination from "../components/Pagination";
 
-const emptyForm = { placa: "", propietario_usuario_id: "", marca_id: "", tipo_vehiculo_id: "", color: "" };
+const emptyForm = { placa: "", propietario_usuario_id: "", marca_id: "", tipo_vehiculo_id: "", color: "", color_hex: "" };
+
+const translateStatus = (status) => {
+  switch (status) {
+    case "PENDING":
+      return "PENDIENTE";
+    case "APPROVED":
+      return "APROBADA";
+    case "REJECTED":
+      return "RECHAZADA";
+    default:
+      return status;
+  }
+};
+
+const translateMethod = (method) => {
+  switch (String(method).toUpperCase()) {
+    case "OPENCV":
+      return "OpenCV (Algoritmo local)";
+    case "REGRESOR":
+      return "Regresor (Red neuronal)";
+    case "CLIP":
+      return "CLIP (Modelo de respaldo)";
+    case "HIBRIDO":
+      return "Híbrido (OpenCV + Red)";
+    default:
+      return method || "No disponible";
+  }
+};
 
 export default function VehicleRegistrationRequests() {
   const [requests, setRequests] = useState([]);
@@ -20,6 +49,11 @@ export default function VehicleRegistrationRequests() {
   const [form, setForm] = useState(emptyForm);
   const [confirm, setConfirm] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   const load = useCallback(async () => {
     try {
@@ -63,7 +97,8 @@ export default function VehicleRegistrationRequests() {
       tipo_vehiculo_id: types.some(type => type.id === item.tipo_sugerido_id)
         ? item.tipo_sugerido_id
         : "",
-      color: suggestedColor
+      color: suggestedColor,
+      color_hex: item.color_hex || ""
     });
     setError("");
   };
@@ -102,10 +137,18 @@ export default function VehicleRegistrationRequests() {
     }
   };
 
-  const filteredRequests = requests.filter(item =>
+  const sortedRequests = [...requests].sort((a, b) => new Date(b.creado_el) - new Date(a.creado_el));
+
+  const filteredRequests = sortedRequests.filter(item =>
     item.placa_sugerida.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.estado.toLowerCase().includes(searchQuery.toLowerCase())
+    translateStatus(item.estado).toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const ITEMS_PER_PAGE = 5;
+  const totalItems = filteredRequests.length;
+  const indexOfLastItem = currentPage * ITEMS_PER_PAGE;
+  const indexOfFirstItem = indexOfLastItem - ITEMS_PER_PAGE;
+  const currentRequests = filteredRequests.slice(indexOfFirstItem, indexOfLastItem);
 
   if (loading) return <Loader label="Cargando solicitudes..." />;
 
@@ -133,7 +176,7 @@ export default function VehicleRegistrationRequests() {
       )}
 
       <div style={{ display: "grid", gap: "1rem" }}>
-        {filteredRequests.map(item => (
+        {currentRequests.map(item => (
           <article className="card" key={item.id} style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
             {images[item.id] && (
               <img
@@ -143,9 +186,26 @@ export default function VehicleRegistrationRequests() {
               />
             )}
             <div style={{ flex: 1, minWidth: 220 }}>
-              <p className="eyebrow" style={{ marginBottom: ".25rem" }}>{item.estado}</p>
+              <span 
+                className="eyebrow" 
+                style={{ 
+                  display: "inline-block",
+                  padding: "0.2rem 0.6rem",
+                  borderRadius: "6px",
+                  fontSize: "0.7rem",
+                  fontWeight: "bold",
+                  marginBottom: ".5rem",
+                  backgroundColor: item.estado === "PENDING" ? "#fef3c7" : item.estado === "APPROVED" ? "#d1fae5" : "#fee2e2",
+                  color: item.estado === "PENDING" ? "#d97706" : item.estado === "APPROVED" ? "#059669" : "#dc2626",
+                  textTransform: "uppercase"
+                }}
+              >
+                {translateStatus(item.estado)}
+              </span>
               <h3 style={{ margin: 0 }}>{item.placa_sugerida}</h3>
-              <p className="muted-text" style={{ margin: 0 }}>Confianza OCR: {Math.round(item.confianza_placa * 100)}%</p>
+              <p className="muted-text" style={{ margin: 0, marginTop: "0.25rem" }}>
+                Confianza OCR: {Math.round(item.confianza_placa * 100)}% &bull; Fecha: {new Date(item.creado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </p>
             </div>
             <button type="button" onClick={() => open(item)} style={{ padding: ".65rem 1.2rem" }}>
               Revisar
@@ -153,6 +213,13 @@ export default function VehicleRegistrationRequests() {
           </article>
         ))}
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalItems={totalItems}
+        itemsPerPage={ITEMS_PER_PAGE}
+        onPageChange={(page) => setCurrentPage(page)}
+      />
 
       {selected && (
         <div className="modal-backdrop">
@@ -214,7 +281,23 @@ export default function VehicleRegistrationRequests() {
                 </select>
               </label>
               <label>Color sugerido
-                <input value={form.color} onChange={e => update("color", e.target.value)} required />
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <input value={form.color} onChange={e => update("color", e.target.value)} required style={{ flex: 1 }} />
+                  <input 
+                    type="color" 
+                    value={form.color_hex || "#cccccc"} 
+                    onChange={e => update("color_hex", e.target.value)}
+                    style={{
+                      width: "38px",
+                      height: "38px",
+                      padding: "2px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      flexShrink: 0
+                    }}
+                  />
+                </div>
                 <small className="muted-text">
                   Sugerencia automática editable; confirma el color observando la evidencia.
                 </small>
@@ -227,7 +310,7 @@ export default function VehicleRegistrationRequests() {
                   readOnly
                 />
                 <small className="muted-text">
-                  Método: {selected.metodo_color || "No disponible"}
+                  Método: {translateMethod(selected.metodo_color)}
                 </small>
               </label>
             </div>

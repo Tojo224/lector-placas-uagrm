@@ -48,9 +48,10 @@ async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, d
         raise HTTPException(422, "El propietario debe ser un usuario regular activo")
     if not await db.get(Marca, payload.marca_id): raise HTTPException(422, "Marca no encontrada")
     if not await db.get(TipoVehiculo, payload.tipo_vehiculo_id): raise HTTPException(422, "Tipo de vehiculo no encontrado")
-    vehicle = Vehiculo(placa=plate, color=payload.color.strip(), marca_id=payload.marca_id, tipo_vehiculo_id=payload.tipo_vehiculo_id, propietario_usuario_id=payload.propietario_usuario_id, foto_id=request.imagen_id)
+    vehicle = Vehiculo(placa=plate, color=payload.color.strip(), color_hex=payload.color_hex, marca_id=payload.marca_id, tipo_vehiculo_id=payload.tipo_vehiculo_id, propietario_usuario_id=payload.propietario_usuario_id, foto_id=request.imagen_id)
     db.add(vehicle); await db.flush()
     request.estado = SolicitudRegistroEstadoEnum.APPROVED; request.revisado_por_usuario_id = reviewer.id; request.vehiculo_creado_id = vehicle.id; request.revisado_el = datetime.now(timezone.utc)
+    request.color_hex = payload.color_hex
     await db.commit(); await db.refresh(request)
     return request
 
