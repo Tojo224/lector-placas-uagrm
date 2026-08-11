@@ -30,13 +30,6 @@ class Settings(BaseSettings):
     FAST_ALPR_EXECUTION_PROVIDER: str = "CPUExecutionProvider"
     VEHICLE_DETECTOR_MODEL: str = "rf-detr-nano-384-coco"
     VEHICLE_DETECTOR_CONFIDENCE: float = 0.45
-    CLIP_COLOR_REPO: str = "Xenova/clip-vit-base-patch32"
-    CLIP_COLOR_REVISION: str = "d15189d7028b43f1d3e65039190477f6af591c2a"
-    CLIP_COLOR_MODEL_FILE: str = "onnx/model_quantized.onnx"
-    COLOR_REGRESSOR_MODEL_FILE: str = "color_regression.onnx"
-    CLIP_COLOR_FALLBACK_THRESHOLD: float = 0.70
-    CLIP_COLOR_MIN_SCORE: float = 0.25
-    CLIP_COLOR_MIN_MARGIN: float = 0.08
     OCR_CONFIDENCE_THRESHOLD: float = 0.55
     OCR_UPSCALE_FACTOR: float = 2.0
     OCR_USE_GRAYSCALE: bool = True

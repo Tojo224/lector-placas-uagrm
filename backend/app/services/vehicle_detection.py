@@ -7,9 +7,6 @@ from typing import Any, ClassVar
 import cv2
 import numpy as np
 
-from app.config.settings import settings
-
-
 @dataclass(frozen=True)
 class VehicleAssociation:
     label: str
@@ -26,8 +23,9 @@ class VehicleAssociationService:
     MIN_ASSOCIATION = 0.58
     AMBIGUITY_MARGIN = 0.08
 
-    def __init__(self, detector: Any) -> None:
+    def __init__(self, detector: Any, confidence_threshold: float = 0.35) -> None:
         self.detector = detector
+        self.confidence_threshold = confidence_threshold
 
     def detect_bytes(self, image_bytes: bytes, plate_bbox) -> VehicleAssociation | None:
         image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -61,7 +59,7 @@ class VehicleAssociationService:
         for detection in detections or []:
             label = str(getattr(detection, "label", "")).lower()
             confidence = float(getattr(detection, "confidence", 0.0))
-            if label not in self.VEHICLE_LABELS or confidence < settings.VEHICLE_DETECTOR_CONFIDENCE:
+            if label not in self.VEHICLE_LABELS or confidence < self.confidence_threshold:
                 continue
             raw = getattr(detection, "bounding_box", None)
             if raw is None:

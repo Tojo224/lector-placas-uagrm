@@ -90,13 +90,14 @@ class PlatesAPITests(unittest.TestCase):
             "tipo_acceso": None,
             "es_registrado": False,
             "propietario_nombre": None,
-            "color_sugerido": "DESCONOCIDO",
-            "confianza_color": 0.0,
-            "metodo_color": "DESCONOCIDO",
+            "color_sugerido": None,
+            "color_hex": None,
+            "confianza_color": None,
+            "metodo_color": None,
             "tipo_sugerido_id": None,
             "tipo_sugerido": None,
-            "confianza_tipo": 0.0,
-            "metodo_tipo": "DESCONOCIDO",
+            "confianza_tipo": None,
+            "metodo_tipo": None,
         }
         image = np.zeros((20, 40, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)
@@ -107,7 +108,7 @@ class PlatesAPITests(unittest.TestCase):
             AsyncMock(return_value=(mock_pipeline_output, 1.0)),
         ):
             response = self.client.post(
-                "/api/v1/plates/analyze",
+                "/api/v1/plates/analyze?realtime=true",
                 files={"file": ("plate.jpg", encoded.tobytes(), "image/jpeg")},
             )
         self.assertEqual(response.status_code, 200)
@@ -128,7 +129,7 @@ class PlatesAPITests(unittest.TestCase):
             "message": "Requiere revision",
         }
         self.client.app.state.vehicle_detector = object()
-        self.client.app.state.clip_color_classifier = object()
+        self.client.app.state.color_classifier = object()
         color_result = SimpleNamespace(
             color_sugerido="AZUL",
             confianza_color=0.81,

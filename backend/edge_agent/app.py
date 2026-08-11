@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 from app.services.image_processing import ImageProcessingError
-from app.services.plate_analysis import analyze_plate_bytes
+from app.services.plate_analysis import analyze_plate_bytes, inspect_vehicle_color
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -33,7 +33,7 @@ from edge_agent.credentials import (
 )
 from edge_agent.db import EdgeDatabase
 from edge_agent.db.repositories import ScanRepository
-from edge_agent.engine import create_ocr_engine
+from edge_agent.engine import create_color_engine, create_ocr_engine
 from edge_agent.media_spool import MediaSpool, MediaSpoolError
 from edge_agent.local_auth import LocalAuthError, LocalAuthService
 from edge_agent.offline_access import OfflineAccessService
@@ -146,9 +146,10 @@ def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None)
         "tipo_acceso": outcome.get("direction"),
         "es_registrado": outcome.get("vehicle_found", False),
         "propietario_nombre": outcome.get("vehicle_owner_name"),
-        "color_sugerido": None,
-        "confianza_color": None,
-        "metodo_color": None,
+        "color_sugerido": outcome.get("color_sugerido"),
+        "color_hex": outcome.get("color_hex"),
+        "confianza_color": outcome.get("confianza_color"),
+        "metodo_color": outcome.get("metodo_color"),
         "tipo_sugerido_id": None,
         "tipo_sugerido": None,
         "confianza_tipo": None,
@@ -165,6 +166,7 @@ def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None)
 def create_edge_app(
     settings: EdgeSettings | None = None,
     engine_factory: Callable[[EdgeSettings], Any] = create_ocr_engine,
+    color_engine_factory: Callable[[EdgeSettings], tuple[Any, Any]] | None = None,
     credential_provider: DeviceCredentialProvider | None = None,
 ) -> FastAPI:
     edge_settings = settings or EdgeSettings.from_env()
@@ -173,6 +175,8 @@ def create_edge_app(
     product_credential_provider = credential_provider or default_device_credential_provider(
         data_dir
     )
+    resolved_color_factory = color_engine_factory or create_color_engine
+    color_enabled = engine_factory is create_ocr_engine or color_engine_factory is not None
 
     async def replace_sync_worker(app: FastAPI, configured: EdgeSettings) -> None:
         if app.state.sync_worker:
@@ -254,6 +258,10 @@ def create_edge_app(
         app.state.sync_worker = None
         app.state.sync_task = None
         app.state.ocr_task = None
+        app.state.color_task = None
+        app.state.vehicle_detector = None
+        app.state.color_classifier = None
+        app.state.color_error = None
         app.state.local_auth = None
         try:
             database = EdgeDatabase(
@@ -306,10 +314,34 @@ def create_edge_app(
                 app.state.lifecycle_state = "DEGRADED"
                 logger.exception("El motor OCR local no pudo inicializarse")
 
+        async def initialize_color() -> None:
+            started = perf_counter()
+            try:
+                detector, classifier = await asyncio.to_thread(
+                    resolved_color_factory, edge_settings
+                )
+                app.state.vehicle_detector = detector
+                app.state.color_classifier = classifier
+                app.state.startup_timings["color_engine_load_ms"] = round(
+                    (perf_counter() - started) * 1000, 1
+                )
+                logger.info("Edge color inicializado con RF-DETR + OpenCV")
+            except Exception as exc:
+                app.state.color_error = type(exc).__name__
+                logger.exception("El detector local de color no pudo inicializarse")
+
         if edge_settings.initialize_ocr_in_background:
             app.state.ocr_task = asyncio.create_task(initialize_ocr())
+            if color_enabled:
+                async def initialize_color_after_ocr() -> None:
+                    await app.state.ocr_task
+                    await initialize_color()
+
+                app.state.color_task = asyncio.create_task(initialize_color_after_ocr())
         else:
             await initialize_ocr()
+            if color_enabled:
+                await initialize_color()
         yield
         if app.state.sync_worker:
             app.state.sync_worker.stop()
@@ -317,7 +349,11 @@ def create_edge_app(
             await app.state.sync_task
         if app.state.ocr_task:
             await app.state.ocr_task
+        if app.state.color_task:
+            await app.state.color_task
         app.state.ocr_engine = None
+        app.state.vehicle_detector = None
+        app.state.color_classifier = None
         app.state.scan_repository = None
         app.state.database = None
 
@@ -380,6 +416,29 @@ def create_edge_app(
             outcome = {"decision": "OCR_ONLY", "reason": "Lectura sin confirmar.",
                        "offline_state": "LOCAL_OCR", "vehicle_found": False,
                        "persisted": False}
+        if (
+            confirm and not realtime and result.get("plate_bbox")
+            and app.state.vehicle_detector is not None
+        ):
+            color_started = perf_counter()
+            color = await inspect_vehicle_color(
+                image_bytes,
+                result["plate_bbox"],
+                app.state.vehicle_detector,
+                app.state.color_classifier,
+            )
+            if color is not None:
+                outcome.update({
+                    "color_sugerido": color.color_sugerido,
+                    "color_hex": color.color_hex,
+                    "confianza_color": color.confianza_color,
+                    "metodo_color": color.metodo_color,
+                })
+            logger.info(
+                "Edge color: elapsed_ms=%.1f method=%s",
+                (perf_counter() - color_started) * 1000,
+                outcome.get("metodo_color", "DESCONOCIDO"),
+            )
         try:
             media_id = await asyncio.to_thread(
                 app.state.media_spool.capture, image_bytes, outcome
@@ -498,6 +557,8 @@ def create_edge_app(
             "lifecycle_state": app.state.lifecycle_state,
             "ready": ready,
             "ocr_ready": ocr_ready,
+            "color_ready": app.state.vehicle_detector is not None,
+            "color_error": app.state.color_error,
             "database_ready": database_ready,
             "access_ready": ready and cache["valid"],
             "cache": cache,
@@ -537,6 +598,8 @@ def create_edge_app(
             "ready": ready,
             "ocr_ready": ocr_ready,
             "ocr_error": app.state.ocr_error,
+            "color_ready": app.state.vehicle_detector is not None,
+            "color_error": app.state.color_error,
             "database_ready": database_ready,
             "database_error": app.state.database_error,
             "database_path": str(edge_settings.database_path()),

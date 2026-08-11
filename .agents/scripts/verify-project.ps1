@@ -28,14 +28,14 @@ $smoke = @'
 import supervision as sv
 from fast_alpr import ALPR
 from open_image_models.detection.factory import create_detector
-from app.services.clip_color import CLIPColorClassifier
+from app.services.vehicle_color import HybridVehicleColorAnalyzer
 required = {
     "Detections": hasattr(sv, "Detections"),
     "crop_image": hasattr(sv, "crop_image"),
     "ColorLookup.INDEX": hasattr(sv.ColorLookup, "INDEX"),
     "FastALPR": ALPR is not None,
     "create_detector": callable(create_detector),
-    "CLIP catalog": len(CLIPColorClassifier.CATALOG) == 9,
+    "color catalog": len(HybridVehicleColorAnalyzer.DEFAULT_HEX) == 9,
 }
 missing = [name for name, available in required.items() if not available]
 if missing:

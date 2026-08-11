@@ -128,10 +128,9 @@ async def analyze_plate_endpoint(
 
     # Una imagen estatica obtiene sugerencia aunque la placa ya este registrada,
     # el OCR requiera revision o no termine creando una solicitud. El modo
-    # realtime evita ejecutar detector vehicular + CLIP en cada frame.
+    # realtime evita ejecutar detector vehicular + OpenCV en cada frame.
     if not realtime and result_dict.get("plate_bbox"):
         vehicle_detector = getattr(request.app.state, "vehicle_detector", None)
-        clip_classifier = getattr(request.app.state, "clip_color_classifier", None)
         if vehicle_detector is not None:
             type_catalog = list((await db.execute(
                 select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
@@ -140,7 +139,7 @@ async def analyze_plate_endpoint(
                 image_bytes,
                 result_dict.get("plate_bbox"),
                 vehicle_detector,
-                clip_classifier,
+                None,
                 type_catalog,
             )
             color_result = inspection.color
@@ -412,6 +411,7 @@ async def analyze_plate_endpoint(
         color_sugerido=color_result.color_sugerido if color_result else (
             "DESCONOCIDO" if not realtime else None
         ),
+        color_hex=color_result.color_hex if color_result else None,
         confianza_color=color_result.confianza_color if color_result else (
             0.0 if not realtime else None
         ),

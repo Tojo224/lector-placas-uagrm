@@ -1,5 +1,32 @@
 # MEMORY
 
+## 2026-08-11 - Unificacion del detector de color central y Edge
+
+- El cambio del companero llego en `c5dec5c` y propuso sustituir CLIP por un
+  regresor ONNX con salida RGB/HEX. El artefacto prometido no existe en ningun
+  commit o rama inspeccionada y el generador incluido produce solo un dummy.
+- La fuente vigente es ahora `HybridVehicleColorAnalyzer` compartido: RF-DETR
+  Nano ONNX -> asociacion de caja -> OpenCV HSV/LAB/K-Means. Si OpenCV es
+  ambiguo, devuelve `DESCONOCIDO`; no fuerza una clase sin modelo entrenado.
+- El ONNX local de 309 bytes era estructuralmente valido, pero solo contenia
+  `ReduceMean`, `Mul` y `Add`, con 24 bytes de constantes y ningun peso
+  aprendido. Se retiro de produccion, pruebas y empaquetado.
+- Edge resuelve RF-DETR por una ruta de recursos explicita y carga color en
+  background despues de OCR. Polling realtime no ejecuta RF-DETR/color.
+- `color_hex` se agrego al contrato de analisis de placas para alinear central y
+  Edge. La migracion de merge `f60718293a4b` resuelve las dos cabezas Alembic.
+- No se agregan PyTorch, Transformers, SciPy ni Supervision al Edge. RF-DETR
+  empaquetado mide 119,942,013 bytes y se usa tambien en central.
+- El staging de modelos se limpia antes de cada build y `[InstallDelete]`
+  elimina solo `{app}/runtime/resources/models` al actualizar; `%ProgramData%`
+  permanece intacto. Esto evita residuos de modelos retirados en instalaciones
+  anteriores.
+- Setup 0.2.0 final: 168969528 bytes, SHA256
+  `0D59B3811633BD354470DD6F863804AA34017A4422A2ECE5F509458DA15AB5B8`.
+  Validacion instalada offline y sin Python: health ok, OCR/color/SQLite ready,
+  UI/MIME/404 correctos y segunda instancia termina con codigo 2.
+
+
 ## 2026-08-09 - Regresión de Color Vehicular Exacto 0.3.0
 
 - Migración del clasificador de color CLIP (154 MB, ~100ms) a regresor MobileNetV3-Small ONNX (5-10 MB, <3ms).

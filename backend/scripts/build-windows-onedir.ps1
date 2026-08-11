@@ -19,6 +19,9 @@ try {
 $manifestPath = Join-Path $backend "packaging\models.json"
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 $modelStage = Join-Path $backend ".runtime\windows-package-models"
+if (Test-Path $modelStage) {
+    Remove-Item -LiteralPath $modelStage -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $modelStage | Out-Null
 foreach ($model in $manifest.models) {
     $source = Join-Path $env:USERPROFILE $model.source

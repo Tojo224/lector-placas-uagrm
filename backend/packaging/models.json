@@ -18,6 +18,12 @@
       "source": ".cache/fast-plate-ocr/cct-xs-v2-global-model/cct_xs_v2_global_plate_config.yaml",
       "sha256": "0335c74a305173bb6f393efed0fde03cadeaa0b649ed8e19f431016d8232d0a6",
       "role": "FastPlateOCR alphabet and preprocessing configuration"
+    },
+    {
+      "name": "rf-detr-nano-384-coco.onnx",
+      "source": ".cache/open-image-models/rf-detr-nano-384-coco/rf-detr-nano-384-coco.onnx",
+      "sha256": "fdcdd1c566ed4ab4d3700ca1ce6f03edadfec2a0655432e40e4c2734623feaec",
+      "role": "RF-DETR vehicle association for shared color analysis"
     }
   ]
 }

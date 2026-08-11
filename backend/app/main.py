@@ -45,8 +45,6 @@ from app.api.v1.registration_requests import router as registration_requests_rou
 from app.api.v1.vehicles import router as vehicles_router
 from app.config.settings import settings
 from app.db.session import database_target
-from app.services.color_regressor import ColorRegressorClassifier
-
 logger = logging.getLogger(__name__)
 
 if sys.platform == "win32":
@@ -134,7 +132,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.fast_alpr_engine = None
     app.state.vehicle_detector = None
-    app.state.clip_color_classifier = None
     if ALPR is None:
         logger.error("FastALPR/FastPlateOCR no esta instalado.")
     else:
@@ -165,14 +162,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             conf_thresh=settings.VEHICLE_DETECTOR_CONFIDENCE,
             providers=[settings.FAST_ALPR_EXECUTION_PROVIDER],
         )
-        app.state.clip_color_classifier = ColorRegressorClassifier()
-        logger.info("Color vehicular listo: OpenCV + Regresor MobileNetV3 local, detector=%s", settings.VEHICLE_DETECTOR_MODEL)
+        logger.info(
+            "Color vehicular listo: RF-DETR + OpenCV local, detector=%s",
+            settings.VEHICLE_DETECTOR_MODEL,
+        )
     except Exception:
-        logger.exception("Detector vehicular/Regresor de color no pudo inicializarse")
+        logger.exception("Detector vehicular/color OpenCV no pudo inicializarse")
 
     app.state.ocr_engine_name = "fast_alpr" if app.state.fast_alpr_engine is not None else "unavailable"
     yield
-    for state_name in ("fast_alpr_engine", "vehicle_detector", "clip_color_classifier", "ocr_engine_name"):
+    for state_name in ("fast_alpr_engine", "vehicle_detector", "ocr_engine_name"):
         if hasattr(app.state, state_name):
             delattr(app.state, state_name)
 

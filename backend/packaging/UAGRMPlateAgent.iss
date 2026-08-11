@@ -47,6 +47,10 @@ Name: "{commonappdata}\UAGRM\PlateAgent\spool"; Permissions: users-modify
 [Files]
 Source: "..\dist\windows\UAGRMPlateAgent\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Retira modelos obsoletos de builds anteriores sin tocar los datos persistentes.
+Type: filesandordirs; Name: "{app}\runtime\resources\models"
+
 [Icons]
 Name: "{group}\UAGRM Plate Scanner"; Filename: "http://127.0.0.1:8765/subir-placa"
 Name: "{group}\Estado del UAGRM Plate Agent"; Filename: "http://127.0.0.1:8765/subir-placa#edge-status"

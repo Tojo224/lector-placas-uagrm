@@ -36,7 +36,7 @@ async def inspect_vehicle(
     image_bytes: bytes,
     plate_bbox: list[float],
     vehicle_detector: Any,
-    clip_classifier: Any,
+    color_classifier: Any,
     type_catalog: Sequence[Any],
 ) -> VehicleInspectionResult:
     """Reuse one vehicle detection for the current color and type suggestions."""
@@ -46,7 +46,7 @@ async def inspect_vehicle(
 
     started_at = perf_counter()
     association = await run_in_threadpool(
-        VehicleAssociationService(vehicle_detector).detect_bytes,
+        VehicleAssociationService(vehicle_detector, 0.45).detect_bytes,
         image_bytes,
         plate_bbox,
     )
@@ -63,9 +63,9 @@ async def inspect_vehicle(
         )
 
     color_result = None
-    if association is not None and clip_classifier is not None:
+    if association is not None:
         color_result = await run_in_threadpool(
-            HybridVehicleColorAnalyzer(vehicle_detector, clip_classifier).analyze,
+            HybridVehicleColorAnalyzer(vehicle_detector, color_classifier).analyze,
             image_bytes,
             plate_bbox,
             association,
@@ -76,4 +76,29 @@ async def inspect_vehicle(
         vehicle_type=type_result,
         suggested_type_name=suggested_type_name,
         elapsed_ms=(perf_counter() - started_at) * 1000,
+    )
+
+
+async def inspect_vehicle_color(
+    image_bytes: bytes,
+    plate_bbox: list[float],
+    vehicle_detector: Any,
+    color_classifier: Any,
+) -> Any | None:
+    """Shared central/Edge color path using one associated vehicle crop."""
+    from app.services.vehicle_color import HybridVehicleColorAnalyzer
+    from app.services.vehicle_detection import VehicleAssociationService
+
+    association = await run_in_threadpool(
+        VehicleAssociationService(vehicle_detector, 0.45).detect_bytes,
+        image_bytes,
+        plate_bbox,
+    )
+    if association is None:
+        return None
+    return await run_in_threadpool(
+        HybridVehicleColorAnalyzer(vehicle_detector, color_classifier).analyze,
+        image_bytes,
+        plate_bbox,
+        association,
     )

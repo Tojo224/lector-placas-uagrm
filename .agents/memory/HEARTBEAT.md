@@ -1,5 +1,31 @@
 # HEARTBEAT
 
+## Estado vigente - 2026-08-11 - Color central compartido con Edge
+
+- **Foco**: integrar sin reversiones el cambio `c5dec5c` y usar una unica logica
+  de color en backend central y Edge empaquetado.
+- **Hallazgos corregidos**:
+  - El commit declaraba MobileNetV3, pero no incluia ningun peso ONNX y su prueba
+    dependia de `.runtime` ignorado. El archivo de 309 bytes generado localmente
+    solo calculaba el promedio RGB y no tenia pesos entrenados; se retiro del
+    runtime y del paquete para impedir colores falsos.
+  - Las ramas Alembic de `color_hex` e identidad Edge tenian dos heads; la
+    revision de merge `f60718293a4b` deja una sola cabeza sin alterar esquemas.
+  - El merge habia retirado exports aprobados de login Edge en `edge.js`; se
+    repusieron exactamente, conservando la nueva llamada central del companero.
+- **Edge**: carga RF-DETR desde recursos explicitos despues de OCR,
+  solo analiza color en capturas confirmadas/no realtime y responde
+  `color_sugerido`, `color_hex`, `confianza_color`, `metodo_color`.
+- **Politica vigente**: central y Edge comparten RF-DETR + OpenCV y el mismo
+  contrato; una lectura ambigua devuelve `DESCONOCIDO` sin `color_hex`.
+- **Release validado**: 153 pass/2 skip, Vite y smoke central correctos. Setup
+  0.2.0 instalado con Python fuera de PATH e Internet bloqueado: OCR/color/DB
+  listos, UI 200, MIME JS/CSS correctos, asset ausente 404 e instancia doble
+  rechazada. El paquete no contiene `color_regression.onnx`.
+- **Artefacto**: `UAGRMPlateAgent-Setup.exe`, 168969528 bytes,
+  SHA256 `0D59B3811633BD354470DD6F863804AA34017A4422A2ECE5F509458DA15AB5B8`.
+
+
 ## Estado vigente - 2026-08-09 - Regresión de Color Vehicular Exacto 0.3.0
 
 - **Foco**: Migrar el backend central del análisis de color basado en CLIP (154 MB, ~100ms) a un modelo regresor MobileNetV3-Small ONNX (5-10 MB, <3ms) para extraer la tonalidad HEX real y persistirla en PostgreSQL.

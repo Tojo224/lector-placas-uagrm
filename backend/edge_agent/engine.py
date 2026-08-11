@@ -22,6 +22,36 @@ def bundled_model_paths() -> tuple[Path, Path, Path] | None:
     return None
 
 
+def vehicle_model_path() -> Path | None:
+    packaged = resource_path("resources", "models")
+    packaged_path = packaged / "rf-detr-nano-384-coco.onnx"
+    if packaged_path.is_file():
+        return packaged_path
+    development_path = (
+        Path.home() / ".cache" / "open-image-models" / "rf-detr-nano-384-coco"
+        / "rf-detr-nano-384-coco.onnx"
+    )
+    return development_path if development_path.is_file() else None
+
+
+def create_color_engine(settings: EdgeSettings) -> tuple[Any, Any]:
+    """Load the same RF-DETR + OpenCV color services used by central, offline."""
+    detector_path = vehicle_model_path()
+    if detector_path is None:
+        raise FileNotFoundError("Modelo local RF-DETR no disponible")
+    from open_image_models.detection.factory import DETECTION_MODELS, create_detector
+
+    spec = DETECTION_MODELS["rf-detr-nano-384-coco"]
+    detector = create_detector(
+        detector_path,
+        backend="rf_detr",
+        class_labels=spec.class_labels,
+        conf_thresh=0.45,
+        providers=[settings.execution_provider],
+    )
+    return detector, None
+
+
 def create_ocr_engine(settings: EdgeSettings) -> Any:
     started_at = perf_counter()
     from fast_alpr import ALPR

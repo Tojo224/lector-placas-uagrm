@@ -13,7 +13,7 @@ from edge_agent.config import EdgeSettings
 from edge_agent.credentials import DeviceCredentialProvider
 from edge_agent.credentials import WindowsDpapiCredentialProvider
 from edge_agent.product_config import ProductConfigStore
-from edge_agent.engine import bundled_model_paths
+from edge_agent.engine import bundled_model_paths, vehicle_model_path
 from edge_agent.runtime import configure_offline_model_runtime
 
 
@@ -56,6 +56,15 @@ def test_model_runtime_is_forced_offline(monkeypatch):
 def test_bundled_model_lookup_is_all_or_nothing(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("edge_agent.engine.resource_path", lambda *_: tmp_path)
     assert bundled_model_paths() is None
+
+
+def test_packaged_vehicle_model_is_resolved_without_downloads(monkeypatch, tmp_path: Path):
+    model_dir = tmp_path / "resources" / "models"
+    model_dir.mkdir(parents=True)
+    (model_dir / "rf-detr-nano-384-coco.onnx").write_bytes(b"detector")
+    monkeypatch.setattr("edge_agent.engine.resource_path", lambda *parts: tmp_path.joinpath(*parts))
+
+    assert vehicle_model_path() == model_dir / "rf-detr-nano-384-coco.onnx"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="DPAPI is Windows-only")

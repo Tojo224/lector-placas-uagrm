@@ -5,11 +5,14 @@ from typing import Any, ClassVar
 
 import cv2
 import numpy as np
-import supervision as sv
-
-from app.config.settings import settings
-from app.services.color_regressor import ColorRegressorClassifier
 from app.services.vehicle_detection import VehicleAssociation, VehicleAssociationService
+
+
+def _crop_image(image: np.ndarray, box) -> np.ndarray:
+    """Crop without Supervision so central and packaged Edge share this service."""
+    height, width = image.shape[:2]
+    x1, y1, x2, y2 = map(int, box)
+    return image[max(0, y1):min(height, y2), max(0, x1):min(width, x2)]
 
 
 @dataclass(frozen=True)
@@ -46,9 +49,15 @@ class HybridVehicleColorAnalyzer:
         "MARRON": "#734B2D",
     }
 
-    def __init__(self, vehicle_detector: Any, clip_classifier: ColorRegressorClassifier) -> None:
+    def __init__(
+        self,
+        vehicle_detector: Any,
+        color_classifier: Any | None = None,
+        fallback_threshold: float = 0.70,
+    ) -> None:
         self.vehicle_detector = vehicle_detector
-        self.clip_classifier = clip_classifier
+        self.color_classifier = color_classifier
+        self.fallback_threshold = fallback_threshold
         self.opencv = VehicleColorAnalyzer()
 
     def analyze(
@@ -74,7 +83,7 @@ class HybridVehicleColorAnalyzer:
 
         needs_fallback = (
             visible == "DESCONOCIDO"
-            or confidence < settings.CLIP_COLOR_FALLBACK_THRESHOLD
+            or confidence < self.fallback_threshold
             or ambiguous
         )
         if not needs_fallback:
@@ -82,9 +91,14 @@ class HybridVehicleColorAnalyzer:
             color_hex = self.DEFAULT_HEX.get(primary_color)
             return VehicleColorResult(visible, round(confidence, 4), "OPENCV", color_hex, vehicle_bbox)
 
-        # Solo ejecutamos el regresor si OpenCV es ambiguo o no es confiable
-        crop = sv.crop_image(image=image, xyxy=np.asarray(vehicle_bbox, dtype=np.float32))
-        reg_result = self.clip_classifier.classify(crop)
+        # Sin un modelo entrenado y validado no se fuerza una clase ambigua.
+        if self.color_classifier is None:
+            return VehicleColorResult(
+                "DESCONOCIDO", 0.0, "DESCONOCIDO", None, vehicle_bbox
+            )
+
+        crop = _crop_image(image, vehicle_bbox)
+        reg_result = self.color_classifier.classify(crop)
         color_hex = reg_result.color_hex if reg_result.confiable else None
 
         if not reg_result.confiable:
@@ -142,7 +156,7 @@ class VehicleColorAnalyzer:
         crop_box = self._vehicle_box(image.shape, plate_bbox, vehicle_bbox)
         if crop_box is None:
             return [self.UNKNOWN.to_dict()]
-        crop = sv.crop_image(image=image, xyxy=np.asarray(crop_box, dtype=np.float32))
+        crop = _crop_image(image, crop_box)
         if crop.size == 0 or min(crop.shape[:2]) < 24:
             return [self.UNKNOWN.to_dict()]
 

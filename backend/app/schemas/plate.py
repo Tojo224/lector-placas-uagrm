@@ -44,6 +44,7 @@ class PlateAnalysisResponse(BaseModel):
     es_registrado: bool = False
     propietario_nombre: str | None = None
     color_sugerido: str | None = None
+    color_hex: str | None = None
     confianza_color: float | None = None
     metodo_color: str | None = None
     tipo_sugerido_id: UUID | None = None

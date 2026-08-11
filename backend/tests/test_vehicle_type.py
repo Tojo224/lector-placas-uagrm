@@ -81,12 +81,12 @@ def test_multiple_vehicles_selects_the_well_associated_one():
     assert result.label == "car"
 
 
-def test_low_detector_confidence_is_unknown(monkeypatch):
+def test_low_detector_confidence_is_unknown():
     image = np.zeros((240, 400, 3), dtype=np.uint8)
     detector = FakeDetector([detection("car", 0.20, (20, 20, 380, 220))])
-    monkeypatch.setattr("app.services.vehicle_detection.settings.VEHICLE_DETECTOR_CONFIDENCE", 0.35)
-
-    assert VehicleAssociationService(detector).detect(image, (140, 170, 250, 205)) is None
+    assert VehicleAssociationService(detector, 0.35).detect(
+        image, (140, 170, 250, 205)
+    ) is None
 
 
 def test_missing_duplicate_and_inactive_catalog_matches_are_unknown():

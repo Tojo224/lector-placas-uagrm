@@ -37,6 +37,15 @@ def fake_engine() -> MagicMock:
     return engine
 
 
+class FakeVehicleDetector:
+    def predict(self, _image):
+        return [SimpleNamespace(
+            label="car",
+            confidence=0.95,
+            bounding_box=SimpleNamespace(x1=20, y1=20, x2=300, y2=170),
+        )]
+
+
 def test_edge_imports_without_database_or_cloudinary():
     env = os.environ.copy()
     env.pop("DATABASE_URL", None)
@@ -128,3 +137,38 @@ def test_edge_can_restart_and_initializes_engine_once_per_start(tmp_path):
         assert restarted_client.get("/api/v1/edge/status").json()["analysis_count"] == 1
 
     assert factory.call_count == 2
+
+
+def test_edge_uses_shared_local_color_model_and_response_contract(tmp_path):
+    image = np.full((190, 320, 3), (180, 85, 35), np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    plate_engine = fake_engine()
+    plate_engine.predict.return_value = [SimpleNamespace(
+        detection=SimpleNamespace(
+            confidence=0.92,
+            bounding_box=SimpleNamespace(x1=130, y1=130, x2=190, y2=160),
+        ),
+        ocr=SimpleNamespace(text="1234ABC", confidence=0.94),
+    )]
+    app = create_edge_app(
+        EdgeSettings(data_dir=tmp_path),
+        engine_factory=lambda _settings: plate_engine,
+        color_engine_factory=lambda _settings: (FakeVehicleDetector(), None),
+    )
+
+    with TestClient(app) as client:
+        health = client.get("/api/v1/edge/health").json()
+        response = client.post(
+            "/api/v1/edge/analyze",
+            files={"file": ("blue-car.jpg", encoded.tobytes(), "image/jpeg")},
+            data={"realtime": "false", "confirm": "true"},
+        )
+
+    assert health["color_ready"] is True
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["color_sugerido"] == "AZUL"
+    assert payload["color_hex"] == "#2355B4"
+    assert payload["metodo_color"] == "OPENCV"
+    assert isinstance(payload["confianza_color"], float)

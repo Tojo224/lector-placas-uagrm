@@ -34,6 +34,7 @@ superseded por los items siguientes. Se conservan debajo solo como historial.
 - `COLOR-UPLOAD-001` | `done` | Prioridad `alta` | Analizar y devolver color en cargas estaticas aunque no se cree solicitud | Dependencias: `COLOR-001`
 - `COLOR-REGRESSOR-001` | `done` | Prioridad `alta` | Migrar clasificación de color CLIP a regresor MobileNetV3 ONNX exacto (<3ms) y previsualizar en React | Dependencias: `COLOR-001`
 - `COLOR-REGRESSOR-DB-001` | `done` | Prioridad `alta` | Agregar columna color_hex a Vehiculo y SolicitudRegistroVehiculo con migración e integración de base de datos | Dependencias: `COLOR-REGRESSOR-001`
+- `COLOR-EDGE-SHARED-001` | `done` | Prioridad `alta` | Compartir RF-DETR/OpenCV entre central y Edge, empaquetar RF-DETR offline, alinear color_hex y rechazar el fallback dummy no entrenado | Dependencias: `COLOR-REGRESSOR-001`
 - `COLOR-CALIBRATION-001` | `blocked` | Prioridad `alta` | Evaluar precision selectiva con capturas propias de dia, noche, movimiento, reflejos y todos los colores | Dependencias: camaras y vehiculos reales
 - `COLOR-SIGLIP-001` | `pending` | Prioridad `baja` | Comparar CLIP contra SigLIP solo si el conjunto real justifica el costo adicional | Dependencias: `COLOR-CALIBRATION-001`
 - `TYPE-001` | `done` | Prioridad `alta` | Sugerir Automovil/Motocicleta/Bus/Camion reutilizando una unica inferencia RF-DETR y asociacion conservadora | Dependencias: `COLOR-001`
