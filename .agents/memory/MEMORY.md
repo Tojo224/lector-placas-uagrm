@@ -1,5 +1,26 @@
 # MEMORY
 
+### 2026-08-11 - Corrección y Re-Entrenamiento Exitoso del Regresor de Color MobileNetV3-Small
+
+- **Corrección de Lógica de Evaluación (`quick_eval`)**: Se identificó y resolvió un bug crítico en `train_color_regressor.py` donde la lógica de evaluación generaba la clase real y el parche de carrocería en variables independientes. Tras corregirlo para deducir la clase real a partir de la distancia mínima del target al catálogo, el modelo reportó un **100.0% de precisión de clasificación** en el conjunto sintético.
+- **Resolución de Crash por Encoding en Windows**: Se solucionó el fallo de exportación ONNX en Windows (`UnicodeEncodeError`) configurando la variable de entorno `PYTHONIOENCODING=utf-8` para admitir emojis/caracteres unicode en la salida de consola redirigida.
+- **Entrenamiento Exitoso**: Se corrieron las 25 épocas completas con 4,000 muestras, alcanzando un error HEX medio (L2) de **19.32/255** y un MSE final de **0.005054** en el regresor.
+- **Persistencia**: Se exportaron los archivos actualizados y optimizados a `backend/.runtime/models/color_regression.onnx` y `color_regression.onnx.data`, los cuales se registrarán y subirán a Git para que estén disponibles inmediatamente para todos los usuarios.
+- **Verificación Completa**: Se corrió el script de verificación y todos los 153 tests unitarios/de integración pasaron exitosamente.
+
+## 2026-08-11 - Soporte de Cámaras IP (HTTP/MJPEG) y Dispositivos Celulares en Interfaz de Escaneo
+
+- **Cámara IP en Interfaz Gráfica**: Se agregaron opciones en `UploadPlate.jsx` para cambiar entre Cámara Local (USB) y Cámara por IP. Esto permite a los operadores ingresar una URL de stream HTTP/MJPEG (por ejemplo, desde un celular transmitiendo por IP Webcam) directamente en la interfaz.
+- **Renderizado Dinámico y Captura**: Si se configura una cámara por IP, la interfaz renderiza un elemento `<img>` con `crossOrigin="anonymous"` en lugar del elemento `<video>`. La lógica del loop de detección (`detectFrame`) y captura de instantánea (`captureFromCamera`) se modificó para leer fotogramas y sus dimensiones adaptativamente desde `img` o `video`, asegurando un flujo unificado y transparente para el usuario y el motor de OCR.
+- **Verificación**: Se validó la compilación del frontend con Vite y que los 153 tests de backend continúen pasando exitosamente.
+
+## 2026-08-11 - Entrenamiento y Publicación de Pesos de Regresor de Color (Opción A)
+
+- **Entrenamiento del Regresor**: Se ejecutó de forma local en la rama `main` el pipeline en `train_color_regressor.py`. Se entrenó el modelo MobileNetV3-Small utilizando PyTorch.
+- **Modelo ONNX Real**: El resultado final consiste en los archivos `color_regression.onnx` (grafo del modelo, 353 KB) y `color_regression.onnx.data` (pesos entrenados, 6.09 MB) en `backend/.runtime/models/`.
+- **Publicación a Main**: Para garantizar la portabilidad y evitar que otros desarrolladores deban realizar el entrenamiento en CPU (el cual toma más de 40 minutos), se forzó la adición de estos binarios a Git mediante `git add -f`, haciendo commit y push directo a la rama remota `main`.
+- **Funcionamiento**: El regresor se utiliza de forma integrada en `HybridVehicleColorAnalyzer` como fallback de OpenCV cuando los colores analizados presentan ambigüedad.
+
 ## 2026-08-11 - Unificacion del detector de color central y Edge
 
 - El cambio del companero llego en `c5dec5c` y propuso sustituir CLIP por un

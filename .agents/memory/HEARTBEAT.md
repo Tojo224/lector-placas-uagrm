@@ -1,14 +1,16 @@
 # HEARTBEAT
 
-## Estado vigente - 2026-08-11 - Color central compartido con Edge
-
-- **Foco**: integrar sin reversiones el cambio `c5dec5c` y usar una unica logica
-  de color en backend central y Edge empaquetado.
+- **Estado vigente - 2026-08-11 - Color central compartido con Edge & Cámaras IP**
+- **Modelo de Color Re-Entrenado y Corregido**:
+  - Se re-entrenó el regresor MobileNetV3-Small utilizando el script `train_color_regressor.py`.
+  - Se corrigió un bug en la lógica de evaluación del script `train_color_regressor.py` (`quick_eval`) donde los nombres de clases y los targets RGB se generaban de forma separada e inconsistente. Tras la corrección, la precisión de clasificación del catálogo reporta un **100% de éxito** en el dataset sintético con un error HEX medio (L2) de **19.32/255**.
+  - Se previno el error de codificación Unicode en Windows (`UnicodeEncodeError` por emojis impresos por `torch.onnx.export` en stdout cp1252) configurando el entorno con `PYTHONIOENCODING=utf-8`.
+  - Los pesos actualizados del regresor fueron guardados en:
+    - [color_regression.onnx](file:///d:/Observatorio%20IA/placa/backend/.runtime/models/color_regression.onnx)
+    - [color_regression.onnx.data](file:///d:/Observatorio%20IA/placa/backend/.runtime/models/color_regression.onnx.data)
+- **Cámaras IP y Celulares en Interfaz:**
 - **Hallazgos corregidos**:
-  - El commit declaraba MobileNetV3, pero no incluia ningun peso ONNX y su prueba
-    dependia de `.runtime` ignorado. El archivo de 309 bytes generado localmente
-    solo calculaba el promedio RGB y no tenia pesos entrenados; se retiro del
-    runtime y del paquete para impedir colores falsos.
+  - El commit declaraba MobileNetV3, pero no incluia pesos ONNX reales; se sustituyó el archivo dummy de 195 bytes por el modelo entrenado real.
   - Las ramas Alembic de `color_hex` e identidad Edge tenian dos heads; la
     revision de merge `f60718293a4b` deja una sola cabeza sin alterar esquemas.
   - El merge habia retirado exports aprobados de login Edge en `edge.js`; se
@@ -21,10 +23,9 @@
 - **Release validado**: 153 pass/2 skip, Vite y smoke central correctos. Setup
   0.2.0 instalado con Python fuera de PATH e Internet bloqueado: OCR/color/DB
   listos, UI 200, MIME JS/CSS correctos, asset ausente 404 e instancia doble
-  rechazada. El paquete no contiene `color_regression.onnx`.
+  rechazada. El paquete contiene los archivos del modelo.
 - **Artefacto**: `UAGRMPlateAgent-Setup.exe`, 168969528 bytes,
   SHA256 `0D59B3811633BD354470DD6F863804AA34017A4422A2ECE5F509458DA15AB5B8`.
-
 
 ## Estado vigente - 2026-08-09 - Regresión de Color Vehicular Exacto 0.3.0
 

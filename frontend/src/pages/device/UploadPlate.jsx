@@ -40,6 +40,7 @@ function UploadPlate() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const ipImageRef = useRef(null);
   const modelRef = useRef(null);
   const requestRef = useRef(null);
   const requestControllerRef = useRef(null);
@@ -68,6 +69,8 @@ function UploadPlate() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [availableCameras, setAvailableCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
+  const [cameraSourceType, setCameraSourceType] = useState("local"); // "local" | "ip"
+  const [ipCameraUrl, setIpCameraUrl] = useState("");
   const [accessZone, setAccessZone] = useState("Portería Principal");
   const [accessNotes, setAccessNotes] = useState("");
   const [accessSuccess, setAccessSuccess] = useState("");
@@ -149,7 +152,7 @@ function UploadPlate() {
       // Siempre detener el stream al re-ejecutar el efecto para evitar acumulación de streams
       stopCamera();
     };
-  }, [activeTab, activeModal]);
+  }, [activeTab, activeModal, cameraSourceType]);
 
   const resetLookupState = () => {
     setLookupError("");
@@ -454,7 +457,12 @@ function UploadPlate() {
   }, [cameraOpen]);
 
   const detectFrame = async () => {
-    if (!videoRef.current || !canvasRef.current || !streamRef.current) return;
+    const isIpMode = cameraSourceType === "ip";
+    if (isIpMode) {
+      if (!ipImageRef.current || !canvasRef.current || !cameraOpen) return;
+    } else {
+      if (!videoRef.current || !canvasRef.current || !streamRef.current) return;
+    }
     if (!edgeConnectedRef.current) {
       setScanError("Edge Agent desconectado. Esperando reconexión...");
       detectionTimerRef.current = setTimeout(detectFrame, 2000);
@@ -465,7 +473,7 @@ function UploadPlate() {
     // pero mantener la cámara encendida.
     if (activeModalRef.current !== null) {
       requestRef.current = null;
-      if (streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
+      if (isIpMode ? cameraOpen : streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
       return;
     }
 
@@ -476,12 +484,13 @@ function UploadPlate() {
 
     // Conserva caracteres de placas lejanas sin enviar el fotograma 1080p completo.
     const MAX_DETECTION_DIM = 960;
-    let videoW = videoRef.current.videoWidth || 960;
-    let videoH = videoRef.current.videoHeight || 540;
+    const sourceEl = isIpMode ? ipImageRef.current : videoRef.current;
+    let videoW = isIpMode ? sourceEl.naturalWidth : sourceEl.videoWidth;
+    let videoH = isIpMode ? sourceEl.naturalHeight : sourceEl.videoHeight;
 
-    if (videoW === 0) {
+    if (videoW === 0 || !videoW) {
       requestRef.current = null;
-      if (streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
+      if (isIpMode ? cameraOpen : streamRef.current) detectionTimerRef.current = setTimeout(detectFrame, 1000);
       return;
     }
 
@@ -498,7 +507,7 @@ function UploadPlate() {
     canvas.width = videoW;
     canvas.height = videoH;
     const context = canvas.getContext("2d", { willReadFrequently: true });
-    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    context.drawImage(sourceEl, 0, 0, canvas.width, canvas.height);
 
     const controller = new AbortController();
     requestControllerRef.current = controller;
@@ -660,7 +669,7 @@ function UploadPlate() {
       }
     }
     requestRef.current = null;
-    if (streamRef.current) {
+    if (cameraSourceType === "ip" ? cameraOpen : streamRef.current) {
       detectionTimerRef.current = setTimeout(detectFrame, nextInterval);
     }
   };
@@ -676,6 +685,14 @@ function UploadPlate() {
     // Si ya hay un stream activo, detenerlo antes de pedir uno nuevo
     if (streamRef.current) {
       stopCamera();
+    }
+    if (cameraSourceType === "ip") {
+      setCameraError("");
+      setCameraOpen(true);
+      if (isLive) {
+        detectionTimerRef.current = setTimeout(detectFrame, 300);
+      }
+      return;
     }
     try {
       setCameraError("");
@@ -747,15 +764,17 @@ function UploadPlate() {
   };
 
   const captureFromCamera = async () => {
-    if (!videoRef.current || !canvasRef.current) {
+    const isIpMode = cameraSourceType === "ip";
+    const sourceEl = isIpMode ? ipImageRef.current : videoRef.current;
+    if (!sourceEl || !canvasRef.current) {
       return;
     }
 
     const canvas = canvasRef.current;
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
+    canvas.width = isIpMode ? sourceEl.naturalWidth : sourceEl.videoWidth;
+    canvas.height = isIpMode ? sourceEl.naturalHeight : sourceEl.videoHeight;
     const context = canvas.getContext("2d");
-    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    context.drawImage(sourceEl, 0, 0, canvas.width, canvas.height);
 
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
     if (!blob) {
@@ -1012,33 +1031,116 @@ function UploadPlate() {
         <div style={{ animation: "fadeIn 0.3s ease" }}>
           {isStaff && (
             <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
-              <label htmlFor="camera-device" style={{ display: "block", fontWeight: 700, marginBottom: "0.5rem" }}>
-                Cámara conectada
-              </label>
-              <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                <select
-                  id="camera-device"
-                  value={selectedCameraId}
-                  onChange={changeCamera}
-                  style={{ flex: "1 1 280px", padding: "0.75rem", borderRadius: "8px" }}
-                >
-                  {availableCameras.length === 0 && <option value="">Cámara predeterminada</option>}
-                  {availableCameras.map((camera, index) => (
-                    <option key={camera.deviceId} value={camera.deviceId}>
-                      {camera.label || `Cámara ${index + 1}`}
-                    </option>
-                  ))}
-                </select>
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", backgroundColor: "#f1f5f9", padding: "4px", borderRadius: "8px" }}>
                 <button
                   type="button"
-                  className="button secondary-button"
-                  onClick={() => refreshCameraList().catch(() => setCameraError("No se pudieron consultar las cámaras."))}
+                  onClick={() => { stopCamera(); setCameraSourceType("local"); }}
+                  style={{
+                    flex: 1,
+                    padding: "0.6rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    backgroundColor: cameraSourceType === "local" ? "white" : "transparent",
+                    color: cameraSourceType === "local" ? "#0f172a" : "#64748b",
+                    fontWeight: "600",
+                    fontSize: "0.9rem",
+                    boxShadow: cameraSourceType === "local" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
                 >
-                  Actualizar cámaras
+                  Cámara Local (USB)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { stopCamera(); setCameraSourceType("ip"); }}
+                  style={{
+                    flex: 1,
+                    padding: "0.6rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    backgroundColor: cameraSourceType === "ip" ? "white" : "transparent",
+                    color: cameraSourceType === "ip" ? "#0f172a" : "#64748b",
+                    fontWeight: "600",
+                    fontSize: "0.9rem",
+                    boxShadow: cameraSourceType === "ip" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  Cámara por IP (HTTP/MJPEG)
                 </button>
               </div>
+
+              <label htmlFor="camera-device" style={{ display: "block", fontWeight: 700, marginBottom: "0.5rem" }}>
+                {cameraSourceType === "ip" ? "URL del Stream de Cámara IP" : "Cámara conectada"}
+              </label>
+
+              {cameraSourceType === "ip" ? (
+                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", width: "100%" }}>
+                  <input
+                    type="url"
+                    placeholder="Ej: http://192.168.1.100:8080/video o http://192.168.1.100:8080/shot.jpg"
+                    value={ipCameraUrl}
+                    onChange={(e) => setIpCameraUrl(e.target.value)}
+                    style={{ 
+                      flex: "1 1 280px", 
+                      padding: "0.75rem", 
+                      borderRadius: "8px", 
+                      border: "1px solid #cbd5e1", 
+                      background: "white",
+                      fontSize: "0.9rem",
+                      outline: "none"
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { stopCamera(); startCamera(true); }}
+                    style={{
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      backgroundColor: "#f8fafc",
+                      color: "#334155",
+                      fontWeight: "600",
+                      fontSize: "0.9rem",
+                      cursor: "pointer",
+                      transition: "background-color 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#e2e8f0"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                  >
+                    Conectar IP
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                  <select
+                    id="camera-device"
+                    value={selectedCameraId}
+                    onChange={changeCamera}
+                    style={{ flex: "1 1 280px", padding: "0.75rem", borderRadius: "8px" }}
+                  >
+                    {availableCameras.length === 0 && <option value="">Cámara predeterminada</option>}
+                    {availableCameras.map((camera, index) => (
+                      <option key={camera.deviceId} value={camera.deviceId}>
+                        {camera.label || `Cámara ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="button secondary-button"
+                    onClick={() => refreshCameraList().catch(() => setCameraError("No se pudieron consultar las cámaras."))}
+                  >
+                    Actualizar cámaras
+                  </button>
+                </div>
+              )}
               <p className="muted-text" style={{ margin: "0.5rem 0 0", fontSize: "0.85rem" }}>
-                Conecta la cámara USB y selecciónala aquí. El navegador puede pedir permiso la primera vez.
+                {cameraSourceType === "ip" 
+                  ? "Ingresa la URL del stream HTTP/MJPEG (ej: desde aplicaciones como IP Webcam en tu teléfono) y presiona Conectar." 
+                  : "Conecta la cámara USB y selecciónala aquí. El navegador puede pedir permiso la primera vez."}
               </p>
             </div>
           )}
@@ -1060,36 +1162,55 @@ function UploadPlate() {
                       top: "10px",
                       left: "10px",
                       right: "10px",
-                      background: "rgba(220, 38, 38, 0.95)",
-                      color: "white",
-                      padding: "8px 16px",
+                      background: "#fef2f2",
+                      color: "#991b1b",
+                      border: "1px solid #fee2e2",
+                      padding: "10px 16px",
                       borderRadius: "8px",
                       zIndex: 30,
                       fontSize: "13px",
-                      fontWeight: "bold",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
+                      fontWeight: "500",
+                      boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
                     }}>
-                      ⚠️ Error del servidor: {scanError}
+                      Error del servidor: {scanError}
                     </div>
                   )}
                   
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="camera-preview"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      display: "block"
-                    }}
-                  />
+                  {cameraSourceType === "ip" ? (
+                    <img
+                      ref={ipImageRef}
+                      src={ipCameraUrl}
+                      crossOrigin="anonymous"
+                      alt="Stream de Cámara IP"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block"
+                      }}
+                      onError={() => setScanError("Error al cargar el stream de la cámara IP. Verifica la URL y la conexión.")}
+                      onLoad={() => setScanError("")}
+                    />
+                  ) : (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      className="camera-preview"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block"
+                      }}
+                    />
+                  )}
 
                   {trackingBoxes.map((box, i) => {
                     const [x, y, width, height] = box.bbox;
-                    const videoW = videoRef.current ? videoRef.current.videoWidth : 640;
-                    const videoH = videoRef.current ? videoRef.current.videoHeight : 480;
+                    const sourceEl = cameraSourceType === "ip" ? ipImageRef.current : videoRef.current;
+                    const videoW = sourceEl ? (cameraSourceType === "ip" ? sourceEl.naturalWidth : sourceEl.videoWidth) : 640;
+                    const videoH = sourceEl ? (cameraSourceType === "ip" ? sourceEl.naturalHeight : sourceEl.videoHeight) : 480;
                     const pctX = (x / videoW) * 100;
                     const pctY = (y / videoH) * 100;
                     const pctW = (width / videoW) * 100;
