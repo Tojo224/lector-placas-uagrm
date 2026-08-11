@@ -1,5 +1,5 @@
 :root {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: #12305f;
   background: linear-gradient(180deg, #ffffff 0%, #eef3fb 100%);
   line-height: 1.5;
@@ -44,13 +44,14 @@ textarea {
 
 button {
   border: 0;
-  border-radius: 12px;
+  border-radius: 8px !important;
   background: linear-gradient(135deg, var(--color-secondary) 0%, #cf3146 100%);
   color: #fff;
   cursor: pointer;
-  padding: 0.85rem 1rem;
+  padding: 0.55rem 0.95rem !important;
   transition: transform 0.2s ease, opacity 0.2s ease, background 0.2s ease;
-  box-shadow: 0 14px 28px rgba(178, 34, 52, 0.18);
+  box-shadow: 0 8px 20px rgba(178, 34, 52, 0.1);
+  font-size: 0.9rem !important;
 }
 
 .danger-button {
@@ -73,10 +74,11 @@ select,
 textarea {
   width: 100%;
   border: 1px solid #cfdae9;
-  border-radius: 12px;
-  padding: 0.85rem 1rem;
+  border-radius: 8px !important;
+  padding: 0.55rem 0.75rem !important;
   background: #fff;
   color: var(--color-text);
+  font-size: 0.9rem !important;
 }
 
 input:focus,
@@ -92,7 +94,7 @@ textarea:focus {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 230px 1fr;
   min-height: 100vh;
   position: relative;
 }
@@ -102,33 +104,44 @@ textarea:focus {
 }
 
 .sidebar {
+  display: flex;
+  flex-direction: column;
   background:
     linear-gradient(180deg, var(--color-sidebar) 0%, var(--color-sidebar-strong) 100%);
   color: #eef4ff;
-  padding: 2rem 1.25rem;
+  padding: 1.15rem 0.75rem;
   border-right: 4px solid rgba(255, 255, 255, 0.16);
   z-index: 20;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
 }
 
 .brand {
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  flex-shrink: 0;
+  padding-left: 0.5rem;
 }
 
 .nav-link {
   display: block;
-  padding: 0.85rem 1rem;
-  margin-bottom: 0.5rem;
-  border-radius: 12px;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.25rem;
+  border-radius: 8px;
   color: #d7e5ff;
+  font-size: 0.85rem;
 }
 
 .sidebar-nav {
-  display: grid;
-  gap: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
 }
 
 .nav-link-icon {
@@ -152,10 +165,13 @@ textarea:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 2rem;
+  padding: 0.75rem 1.5rem;
   border-bottom: 1px solid rgba(21, 62, 117, 0.1);
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 30;
 }
 
 .topbar-heading {
@@ -198,7 +214,7 @@ textarea:focus {
 }
 
 .content-area {
-  padding: 0 2rem 2rem;
+  padding: 0 1.5rem 1.5rem;
 }
 
 .eyebrow {
@@ -213,20 +229,37 @@ textarea:focus {
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 24px;
-  box-shadow: 0 18px 40px rgba(17, 37, 68, 0.08);
-  padding: 1.5rem;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(17, 37, 68, 0.05);
+  padding: 1.15rem;
 }
 
 .hero {
   background:
     linear-gradient(135deg, #ffffff 0%, #edf3fc 58%, #dce7f8 100%);
-  border-left: 6px solid var(--color-secondary);
+  border-left: 5px solid var(--color-secondary);
+  padding: 0.85rem 1.25rem;
+  border-radius: 12px;
+}
+
+.hero h2 {
+  font-size: 1.3rem !important;
+  font-weight: 700;
+}
+
+.hero .eyebrow {
+  font-size: 0.7rem;
+  margin-bottom: 0.15rem;
+}
+
+.hero .muted-text {
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
 }
 
 .page-stack {
   display: grid;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 .section-heading {
@@ -238,7 +271,7 @@ textarea:focus {
 
 .section-heading h3 {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1.5rem;
   color: var(--color-primary);
 }
 
@@ -354,10 +387,10 @@ textarea:focus {
   max-height: calc(100vh - 2rem);
   overflow: auto;
   background: var(--color-surface-strong);
-  border-radius: 24px;
+  border-radius: 16px;
   border: 1px solid var(--color-border);
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
-  padding: 1.5rem;
+  padding: 1.25rem;
 }
 
 .modal-large {
@@ -1090,4 +1123,107 @@ textarea:focus {
   .topbar-heading p {
     font-size: 0.65rem !important;
   }
+}
+
+/* ==========================================================================
+   OPTIMIZACIONES DE TABLAS Y RENDIMIENTO DE ESPACIO
+   ========================================================================== */
+
+/* Overrides para celdas de tablas */
+table th,
+table td {
+  padding: 0.55rem 0.75rem !important;
+  font-size: 0.85rem !important;
+  vertical-align: middle !important;
+}
+
+table tr {
+  height: auto !important;
+}
+
+/* Fotos de vehículos reducidas en tabla */
+table td img {
+  width: 58px !important;
+  height: 58px !important;
+  border-radius: 6px !important;
+  object-fit: cover !important;
+}
+
+/* Botones de acción compactos dentro de celdas */
+table td button,
+table td a {
+  padding: 0.35rem 0.65rem !important;
+  font-size: 0.8rem !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+}
+
+table td button svg,
+table td a svg {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+/* Ajustes de monospaced license plates */
+table td span[style*="fontFamily"] {
+  font-size: 0.82rem !important;
+  padding: 0.15rem 0.4rem !important;
+}
+
+/* Forzar botones de Login/Registro para que conserven un aspecto amplio */
+.auth-card button,
+.auth-screen button {
+  padding: 0.75rem 1.5rem !important;
+  font-size: 0.95rem !important;
+  border-radius: 8px !important;
+}
+
+/* Reducir tamaño de las barras de búsqueda y botones de refresco */
+.search-input {
+  padding: 0.55rem 0.95rem !important;
+  border-radius: 8px !important;
+  font-size: 0.88rem !important;
+}
+
+.refresh-button {
+  padding: 0.55rem 0.95rem !important;
+  border-radius: 8px !important;
+  font-size: 0.88rem !important;
+}
+
+/* Normalizar tamaños de títulos y subtítulos dentro de las páginas de contenido */
+.content-area h1 { font-size: 1.5rem !important; }
+.content-area h2 { font-size: 1.25rem !important; }
+.content-area h3 { font-size: 1.1rem !important; }
+.content-area h4 { font-size: 0.95rem !important; }
+
+/* Densidad y alineación compacta para formularios en modales y páginas */
+.form-grid, 
+.details-grid,
+.registration-form,
+.manual-plate-form {
+  gap: 0.75rem !important;
+}
+
+.form-grid label,
+.details-grid label,
+.registration-form label,
+.manual-plate-form label {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.25rem !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  color: var(--color-muted) !important;
+}
+
+/* Espacio inferior de descripciones secundarias bajo etiquetas de formulario */
+.form-grid label small,
+.details-grid label small,
+.registration-form label small {
+  margin-top: 0.1rem !important;
+  font-size: 0.72rem !important;
 }

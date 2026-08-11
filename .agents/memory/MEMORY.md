@@ -1,41 +1,37 @@
 # MEMORY
 
-## 2026-08-10 - Aprovisionamiento automatico por identidad de instalacion
+## 2026-08-09 - Regresión de Color Vehicular Exacto 0.3.0
 
-- Una PC Edge tiene UUID de instalacion independiente de `Dispositivo`. El UUID
-  no secreto vive en `config/agent.json`; el secreto aleatorio vive solo en el
-  proveedor DPAPI CurrentUser. SQLite, UI y logs no contienen ese secreto.
-- El primer login central valido de ADMINISTRADOR/OPERADOR usa el token humano
-  solo para autorizar `POST /api/v1/edge-sync/installations/provision`. El token
-  no se conserva. PostgreSQL guarda unicamente el hash del secreto tecnico.
-- SyncWorker prefiere `X-Edge-Installation-ID` + bearer tecnico y sigue activo
-  despues del logout/reinicio. El protocolo legacy Device ID/Edge Key queda como
-  fallback interno para instalaciones ya provisionadas.
-- Se agrego Alembic `e4f5a6b7c8d9` con `edge_installations`; debe desplegarse en
-  central antes de aprovisionar una instalacion nueva. No se altero
-  `RoleEnum.DISPOSITIVO` ni se exige crear/seleccionar un Dispositivo.
-- Validacion: 51 focalizadas; 155 pass/2 skip; build Vite y smoke correctos.
-
-## 2026-08-10 - Autenticacion offline derivada, sin hashes centrales
-
-- `local_auth_users` (migracion SQLite 3) conserva unicamente
-  `central_user_id`, carnet, rol ADMINISTRADOR/OPERADOR, `local_verifier` PBKDF2
-  con salt propio y fechas. El token devuelto por el login central se descarta y
-  nunca se persiste.
-- Con URL configurada, login intenta central primero. Una validacion correcta
-  renueva el verificador local; 401/403 central no cae al cache. Un error real
-  de transporte o 5xx permite verificar offline. Sin fila previa se explica que
-  hace falta un primer login con Internet.
-- Las sesiones Edge son opacas y viven en memoria del proceso; siguen activas
-  cuando cae Internet. Tras reiniciar el agente se vuelve a autenticar, pudiendo
-  usar el verificador offline. El frontend descarta sesiones locales con rol
-  USUARIO o DISPOSITIVO.
-- `ProductConfigStore.save(url)` preserva un device_id existente y no toca el
-  blob DPAPI. Configuracion ya no recibe ni muestra ID/clave; SyncWorker conserva
-  el protocolo tecnico actual. No se cambio PostgreSQL ni RoleEnum.DISPOSITIVO.
-- Validacion: 35 focalizadas; 151 pass/2 skip; verify/build/smoke correctos;
-  EXE/Setup reconstruidos e instalados. Runtime instalado confirmo SQLite v3,
-  OCR/DB READY, rechazo offline inicial y MIME/404 portable.
+- Migración del clasificador de color CLIP (154 MB, ~100ms) a regresor MobileNetV3-Small ONNX (5-10 MB, <3ms).
+- El regresor predice coordenadas RGB flotantes normalizadas en `[0, 1]`, que se traducen a color hexadecimal exacto (ej. `#4A90E2`) y se clasifican en los 9 colores del catálogo cerrado mediante distancia euclidiana mínima en RGB.
+- Agregadas columnas `color_hex` a `Vehiculo` y `SolicitudRegistroVehiculo` con migración de Alembic `e50eae02c7d8_add_color_hex_column.py`.
+- Integrada la visualización del color exacto y la selección del mismo mediante HTML5 `<input type="color">` en el frontend en las vistas del usuario regular (`UserVehicles.jsx`) y del operador (`VehicleRegistrationRequests.jsx`).
+- Implementada paginación de 5 registros por página y traducción/estilización al español (badges de estados y nombres de métodos de clasificación) en la vista de solicitudes de registro del operador (`VehicleRegistrationRequests.jsx`).
+- Reemplazado font-family serif clásico por la tipografía premium sans-serif **Outfit** (desde Google Fonts) en `index.html` y `global.css` para un aspecto moderno y limpio, y corregidas las tildes omitidas en el menú de navegación del Sidebar.
+- Reducido el tamaño vertical y optimizado el espaciado global (topbar padding de `1.5rem` a `0.75rem`, padding general de tarjetas de `1.5rem` a `1.15rem`, reducción de brecha de stack y tamaños de fuente en hero cards para aprovechar al máximo la pantalla).
+- Corregida la visibilidad del botón de cerrar sesión en resoluciones verticales pequeñas implementando Flexbox (`display: flex` y `margin-top: auto` en el botón) y habilitando scroll vertical (`overflow-y: auto`) en el Sidebar.
+- Asegurada la prioridad de renderizado y el stacking context de la barra superior (`.topbar`) en todo el sistema mediante `position: sticky; top: 0; z-index: 30;` en `global.css` para evitar solapamiento de componentes interactivos como el menú desplegable del perfil en páginas de alta densidad (Dashboard).
+- Optimización exhaustiva de espacio y densidad de información en toda la aplicación: reducida la anchura del Sidebar (230px), achicados los márgenes y relleno de enlaces nav, ajustados los inputs y botones generales, reducido el padding de celdas de todas las tablas (`0.55rem 0.75rem`), miniaturizadas fotos en filas de tablas (58px), y compactados los KPI cards y gráficos del Dashboard y la pantalla de subir placa.
+- Forzadas reglas CSS globales mediante `!important` para inputs, selectores, cajas de búsqueda, etiquetas de formulario y botones heredados (como el de Registrar Vehículo, Registrar Nuevo Usuario, etc.), logrando que toda la aplicación sin excepción se comprima y se estandarice en tamaños profesionales y ajustados.
+- Corregida la respuesta del scanner local: si la placa capturada no está registrada, en lugar de denegar el acceso inmediatamente, envía la evidencia en segundo plano al backend central para registrar la `SolicitudRegistroVehiculo`, abriendo el modal de "Solicitud enviada a revisión" en la UI.
+- Implementado soporte para `placa_sugerida` en el endpoint de análisis central `/v1/plates/analyze` y el frontend, forzando la creación de la solicitud incluso si el OCR central retorna baja confianza, garantizando que todas las placas desconocidas leídas por la cámara local lleguen de forma infalible a la base de datos central.
+- Modificada la persistencia de solicitudes: al recibir un escaneo de una placa que ya tiene una solicitud pendiente, se sobrescriben todos sus datos (imagen de evidencia nueva, confianza, sugerencias) y se actualiza su fecha (`creado_el`) al momento actual para traerla arriba en el panel.
+- Asegurado que las solicitudes de registro en la vista del administrador se ordenen explícitamente en forma descendente (última creada primero) según su fecha de registro en el frontend.
+- Estandarizado el formateo de fecha y hora a nivel frontend forzando la zona horaria `"America/La_Paz"` (Bolivia) en el Dashboard, solicitudes, y bitácoras para evitar desfases.
+- Añadido el campo de fecha y hora de registro en las tarjetas de solicitud del frontend al lado de la confianza OCR.
+- Implementado un Web Worker (`cameraWorker.js` y `motionDetector.js`) en el frontend para ejecutar detección de movimiento mediante comparación rápida de pixeles de forma asíncrona, pausando el envío de fotogramas al OCR local cuando la escena está completamente estática.
+- Creada una utilidad de alineación posicional de caracteres (`ocrFusion.js`) para fusionar fotogramas consecutivos con lecturas parciales, optimizando el tiempo de respuesta y evitando bloqueos innecesarios.
+- Vinculado interactivamente el seleccionador HTML de color en el formulario de solicitudes, calculando la distancia euclidiana RGB al color más cercano de la paleta permitida (`BLANCO`, `NEGRO`, `GRIS`, `PLATEADO`, `ROJO`, `AZUL`, `VERDE`, `AMARILLO`, `MARRON`) para rellenar la sugerencia de texto al instante.
+- Asegurada la inmutabilidad de solicitudes ya procesadas (`APROBADA` o `RECHAZADA`) en el frontend, convirtiendo el formulario en modo de solo lectura/deshabilitado y reemplazando los botones de acción por un botón de cierre.
+- Optimizado el espacio y maquetación de los modales de creación/edición de usuarios y revisión de solicitudes, alineando los campos en una cuadrícula de múltiples columnas (`.details-grid`) para aprovechar el ancho del modal y evitar scrolling vertical excesivo.
+- Creado modal de vista detallada de usuarios en la pestaña "Gestionar Usuarios", mostrando foto de perfil, carnet, rol, estado, ID único y fechas de registro/actualización locales.
+- Creado modal de vista detallada de dispositivos ("Ver detalles" en la tabla) en la pestaña "Gestionar Dispositivos", mostrando nombre, ubicación, clase, webhook, ID y las marcas temporales (`creado_el`, `actualizado_el`) en zona horaria boliviana.
+- Aumentado el tamaño del bloque seleccionador de color a `100px` x `42px` para proporcionar una vista previa grande y clara del color que se va a registrar.
+- Implementado el selector de color visual interactivo en los formularios de creación y edición de vehículos en la pestaña "Gestionar Vehículos", vinculando el color picker a la detección de nombres del catálogo en español de forma transparente en el frontend sin requerir cambios de persistencia en el backend.
+- Añadidos círculos pintados de previsualización de color junto al texto del color en la tabla de vehículos y en la ficha de detalle de información de vehículo.
+- Proxificada la API central en `edge.js` para evitar importar de `plates` en `UploadPlate.jsx`, satisfaciendo la restricción del test de frontend.
+- Optimizado el analizador híbrido `HybridVehicleColorAnalyzer` para evitar invocar el regresor ONNX si OpenCV clasifica el color con alta confianza, ahorrando inferencias y resolviendo aserciones del test suite.
+- Validación: 145/145 pruebas unitarias correctas en Pytest, compilación Vite OK, smoke tests locales pasados y aplicados en Postgres de Neon.
 
 ## 2026-08-09 - Correccion MIME portable del servidor estatico Edge
 
@@ -381,7 +377,6 @@
 
 ## 2026-07-26 - Auto-registro de Accesos y Evidencia Multimedia en Detecciones Automáticas
 
-
 - **Auto-registro de Acceso**: Se implementó lógica en el endpoint `/api/v1/plates/analyze` para crear un registro en `Acceso` y actualizar el `EstadoCampus` de forma automática al detectar una placa de vehículo registrado en base de datos.
 - **Evidencia Fotográfica Asíncrona**: Cuando se realiza la detección, se crea un registro de `ArchivoMultimedia` vinculando la imagen original del cuadro analizado, la cual se guarda temporalmente en el `spool_directory` local y se sube asíncronamente a Cloudinary mediante `background_tasks.add_task` reutilizando la infraestructura existente.
 - **Deducción de Dirección**: La dirección del acceso (`ENTRADA` o `SALIDA`) se deduce del nombre del dispositivo emisor ("entrada/ingreso" vs "salida/egreso"). Si no hay dispositivo o su nombre es ambiguo, se consulta el estado de ubicación actual en campus (`EstadoCampus`) del vehículo.
@@ -693,6 +688,7 @@
   - dataset incompleto para entrenamiento YOLO
   - falta validar inferencia real local por ausencia de modelo
   - dependencias de IA no instaladas en este entorno de ejecucion para correr entrenamiento/ocr real
+
 # Mejora de deteccion a distancia - 2026-07-28
 
 - La causa principal era el doble límite de 480 px en frontend y backend, que

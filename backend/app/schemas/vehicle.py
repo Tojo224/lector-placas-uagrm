@@ -34,6 +34,7 @@ class TipoVehiculoCreate(BaseModel):
 class VehiculoBase(BaseModel):
     placa: str = Field(min_length=5, max_length=20)
     color: str = Field(min_length=1, max_length=100)
+    color_hex: str | None = None
     marca_id: UUID
     tipo_vehiculo_id: UUID
     propietario_usuario_id: UUID

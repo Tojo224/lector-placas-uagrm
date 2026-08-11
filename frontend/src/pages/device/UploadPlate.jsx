@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import UploadImage from "../../components/UploadImage";
-import { analyzeWithEdge, getEdgeHealth, getEdgeStatus, getEdgeVersion } from "../../api/edge";
+import { analyzeWithEdge, getEdgeHealth, getEdgeStatus, getEdgeVersion, uploadPlateImage } from "../../api/edge";
 import { useAuth } from "../../hooks/useAuth";
 import { formatPlate } from "../../utils/formatters";
 import VehicleFoundModal from "../../components/UploadPlate/VehicleFoundModal";
 import PlateNotFoundModal from "../../components/UploadPlate/PlateNotFoundModal";
+
+import { fuseOCRReads } from "../../utils/ocrFusion";
 
 const ownerInitialState = {
   code: "",
@@ -42,6 +44,8 @@ function UploadPlate() {
   const requestRef = useRef(null);
   const requestControllerRef = useRef(null);
   const detectionTimerRef = useRef(null);
+  const readsHistoryRef = useRef([]);
+  const workerRef = useRef(null);
   // Mapa de votos: texto_normalizado -> { count, bbox, score, text, lastFrameTs }
   const voteMapRef = useRef(new Map());
   const VOTES_NEEDED = 2; // OPT-D: 2 frames consecutivos — balance entre velocidad y anti-falsos-positivos
@@ -79,6 +83,24 @@ function UploadPlate() {
   const [decisionReason, setDecisionReason] = useState("");
   const activeModalRef = useRef(null);
   const edgeConnectedRef = useRef(false);
+
+  useEffect(() => {
+    // Inicializar el Web Worker para detección de movimiento en segundo plano
+    workerRef.current = new Worker(
+      new URL("../../utils/cameraWorker.js", import.meta.url),
+      { type: "module" }
+    );
+
+    // Configurar parámetros de detección de movimiento
+    workerRef.current.postMessage({
+      type: "INIT",
+      payload: { threshold: 20, minPercent: 0.05 }
+    });
+
+    return () => {
+      workerRef.current?.terminate();
+    };
+  }, []);
 
   useEffect(() => {
     activeModalRef.current = activeModal;
@@ -162,7 +184,7 @@ function UploadPlate() {
     setLookupLoading(true);
 
     if (!analysisResult) {
-      setLookupError("La decisión offline requiere una imagen analizada por el Edge Agent.");
+      setLookupError("Se requiere una imagen analizada por el Edge Agent para continuar.");
       setLookupLoading(false);
       return;
     }
@@ -194,7 +216,37 @@ function UploadPlate() {
         setManualPlate("");
       }, 5000);
     } else {
+      // Placa desconocida o denegada por el Edge Agent — enviar al servidor central
+      // para crear o reutilizar una SolicitudRegistroVehiculo.
       setManualPlate(plateValue);
+      if (evidence) {
+        try {
+          const form = new FormData();
+          form.append("file", evidence, "vehiculo-desconocido.jpg");
+          if (plateValue) {
+            form.append("placa_sugerida", plateValue.replace("-", "").replace(" ", "").toUpperCase().trim());
+          }
+          const centralResult = await uploadPlateImage(form);
+          // Mostrar modal de solicitud si el backend procesó la imagen,
+          // tanto si crea una nueva solicitud como si ya existía una pendiente.
+          if (centralResult && (centralResult.solicitud_id || centralResult.placa_detectada)) {
+            setAnalysisPreview(centralResult);
+            setActiveModal("plate_request_sent");
+            setLookupLoading(false);
+            return;
+          }
+        } catch (centralError) {
+          const status = centralError?.response?.status;
+          if (status === 401 || status === 403) {
+            setLookupError("Sesión expirada o sin permisos. Por favor inicia sesión de nuevo.");
+            setLookupLoading(false);
+            return;
+          }
+          // Error de red o del servidor — registrar pero continuar mostrando
+          // el modal de placa no encontrada para no bloquear el flujo.
+          console.warn("No se pudo enviar la solicitud al servidor central:", centralError?.response?.data?.detail || centralError?.message);
+        }
+      }
       setActiveModal("plate_not_found");
     }
     setLookupLoading(false);
@@ -380,17 +432,16 @@ function UploadPlate() {
         setManualPlate(analysis.placa_normalizada);
         await handleLookupPlate(analysis.placa_normalizada, file, analysis);
       } else if (analysis?.placa_detectada) {
-        // OCR detectó texto pero no cumple el formato: rellenar campo para corrección manual
+        // OCR detectó texto pero con baja confianza o formato inválido.
+        // Intentar igualmente enviar al servidor central para que re-analice.
         const rawClean = analysis.placa_detectada.replace(/[^A-Z0-9]/gi, "").toUpperCase();
         setManualPlate(rawClean);
-        setLookupError(
-          `OCR detecto: "${analysis.placa_detectada}" — ${analysis.mensaje || "Verifica y corrige el numero de placa si es necesario."}`
-        );
+        await handleLookupPlate(rawClean, file, analysis);
       } else {
         setLookupError(analysis?.mensaje || "No se pudo detectar una placa en la imagen.");
       }
     } catch (error) {
-      setLookupError(error?.response?.data?.detail || "No se pudo analizar la imagen.");
+      setLookupError(error?.response?.data?.detail || "No se pudo analizar la imagen. Intenta de nuevo.");
     } finally {
       setLookupLoading(false);
     }
@@ -405,7 +456,7 @@ function UploadPlate() {
   const detectFrame = async () => {
     if (!videoRef.current || !canvasRef.current || !streamRef.current) return;
     if (!edgeConnectedRef.current) {
-      setScanError("Edge Agent desconectado. No se enviarán frames al backend central.");
+      setScanError("Edge Agent desconectado. Esperando reconexión...");
       detectionTimerRef.current = setTimeout(detectFrame, 2000);
       return;
     }
@@ -453,13 +504,39 @@ function UploadPlate() {
     requestControllerRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    // El siguiente frame se toma al terminar la petición anterior. Una pausa
-    // corta evita perder al vehículo mientras cruza el encuadre.
     let nextInterval = 250;
 
     try {
-      // El backend convierte a gris. Evitar getImageData/putImageData aquí
-      // reduce el tiempo entre la captura física y el envío del fotograma.
+      // --- Detección de Movimiento por Web Worker ---
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+      const buffer = imageData.data;
+
+      const hasMotion = await new Promise((resolve) => {
+        const handleMessage = (e) => {
+          if (e.data.type === "RESULT") {
+            workerRef.current.removeEventListener("message", handleMessage);
+            resolve(e.data.payload.hasMotion);
+          }
+        };
+        workerRef.current.addEventListener("message", handleMessage);
+        workerRef.current.postMessage({ type: "PROCESS", payload: { buffer } }, [buffer.buffer]);
+      });
+
+      if (!hasMotion) {
+        requestRef.current = null;
+        clearTimeout(timeoutId);
+        if (requestControllerRef.current === controller) {
+          requestControllerRef.current = null;
+        }
+        setScanError("");
+        setTrackingBoxes([]);
+        if (streamRef.current) {
+          detectionTimerRef.current = setTimeout(detectFrame, 800); // 800ms de espera si está estático
+        }
+        return;
+      }
+
+      // --- Envío del fotograma al Edge Agent ---
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.90));
       if (blob) {
         const formData = new FormData();
@@ -472,13 +549,21 @@ function UploadPlate() {
               ? analysis.placa_detectada.replace(/[^A-Z0-9]/gi, "").toUpperCase()
               : null);
 
-        // --- Sistema de votación por consenso ---
-        // Un texto solo se confirma cuando aparece N veces seguidas
         const voteMap = voteMapRef.current;
         const now = Date.now();
 
         if (normalizedText && normalizedText.length >= 4) {
-          // Texto detectado: sumar voto
+          // Guardar en el historial de lecturas recientes (máximo 5)
+          const readsHistory = readsHistoryRef.current;
+          readsHistory.push({ text: normalizedText, confidence: analysis.confianza });
+          if (readsHistory.length > 5) {
+            readsHistory.shift();
+          }
+
+          // Intentar fusionar las lecturas del historial
+          const fusedPlate = fuseOCRReads(readsHistory);
+
+          // Sumar voto para el tracking visual en pantalla
           const existing = voteMap.get(normalizedText);
           const newCount = existing ? existing.count + 1 : 1;
           voteMap.set(normalizedText, {
@@ -490,28 +575,18 @@ function UploadPlate() {
             lastFrameTs: now,
           });
 
-          // Limpiar textos que no han aparecido en los últimos 4 frames (~4s)
+          // Limpiar textos antiguos del mapa de votos
           for (const [key, val] of voteMap.entries()) {
             if (key !== normalizedText && now - val.lastFrameTs > 4000) {
               voteMap.delete(key);
             }
           }
 
-          // Verificar si algún texto alcanzó el umbral de votos
-          const winner = [...voteMap.entries()].find(
-            ([, v]) => v.isValidFormat && (
-              v.count >= VOTES_NEEDED ||
-              // Una lectura muy fuerte se captura inmediatamente: en movimiento
-              // puede no existir un segundo fotograma nítido.
-              (v.count === 1 && v.score >= 0.88)
-            )
-          );
+          // Ganador: si la fusión nos da una placa válida, o si un frame tiene altísima confianza y formato válido
+          const isWinner = fusedPlate || (analysis.es_formato_valido && analysis.confianza >= 0.88);
 
-          if (winner) {
-            // Confirmado por consenso → auto-captura
-            const [, winnerData] = winner;
-            // El polling usa 640px para OCR. Solo al confirmar capturamos una
-            // evidencia panoramica a la resolucion nativa de la camara.
+          if (isWinner) {
+            const finalPlate = fusedPlate || normalizedText;
             const evidenceCanvas = document.createElement("canvas");
             evidenceCanvas.width = videoRef.current.videoWidth || canvas.width;
             evidenceCanvas.height = videoRef.current.videoHeight || canvas.height;
@@ -526,18 +601,19 @@ function UploadPlate() {
               evidenceCanvas.toBlob(resolve, "image/jpeg", 0.92)
             );
             voteMap.clear();
+            readsHistoryRef.current = [];
             setTrackingBoxes([]);
             setAnalysisPreview(analysis);
-            setManualPlate(normalizedText);
+            setManualPlate(finalPlate);
             const confirmedForm = new FormData();
             confirmedForm.append("file", evidenceBlob || blob, "evidence.jpg");
             const confirmed = await analyzeWithEdge(confirmedForm, false, controller.signal, true);
             setAnalysisPreview(confirmed);
-            handleLookupPlate(normalizedText, evidenceBlob || blob, confirmed);
+            handleLookupPlate(finalPlate, evidenceBlob || blob, confirmed);
             return;
           }
 
-          // Mostrar caja con contador de votos
+          // Mostrar cajas de seguimiento en la UI
           let newBoxes = [];
           if (analysis.raw_bboxes && analysis.raw_bboxes.length > 0) {
             newBoxes = analysis.raw_bboxes.map(bbox => {
@@ -551,7 +627,7 @@ function UploadPlate() {
             newBoxes.push({
               bbox: [x1, y1, x2 - x1, y2 - y1],
               score: analysis.confianza,
-              text: analysis.placa_normalizada || analysis.placa_detectada,
+              text: fusedPlate || analysis.placa_normalizada || analysis.placa_detectada,
               votes: entry ? entry.count : 1,
               votesNeeded: VOTES_NEEDED,
               type: 'plate-voting',
@@ -559,12 +635,10 @@ function UploadPlate() {
           }
           setScanError("");
           setTrackingBoxes(newBoxes);
-
-          // OPT-D: Throttle 500ms (antes 600ms) — más frames sin afectar OCR CPU
           nextInterval = 500;
 
         } else {
-          // Sin texto válido: limpiar votos viejos y reducir frecuencia
+          // Sin texto válido: limpiar votos antiguos
           for (const [key, val] of voteMap.entries()) {
             if (now - val.lastFrameTs > 3000) voteMap.delete(key);
           }
@@ -576,7 +650,7 @@ function UploadPlate() {
     } catch (e) {
       if (e.name !== "AbortError" && e.code !== "ERR_CANCELED") {
         console.error("Error en detectFrame:", e);
-        setScanError(e.response?.data?.detail || e.mensaje || "Error al procesar la imagen.");
+        setScanError(e.response?.data?.detail || e.mensaje || "Error al procesar el fotograma. Reintentando...");
         setTrackingBoxes([]);
       }
     } finally {
@@ -640,8 +714,13 @@ function UploadPlate() {
       }
       
     } catch (error) {
-      setCameraError("No se pudo abrir la camara del dispositivo.");
-      console.error(error);
+      const msg = error?.name === "NotAllowedError"
+        ? "Permiso de cámara denegado. Habilita el acceso en la configuración del navegador."
+        : error?.name === "NotFoundError"
+          ? "No se encontró ninguna cámara disponible. Verifica la conexión del dispositivo."
+          : "No se pudo abrir la cámara. Verifica que no esté siendo usada por otra aplicación.";
+      setCameraError(msg);
+      console.error("Error al abrir cámara:", error);
     }
   };
 
@@ -695,10 +774,10 @@ function UploadPlate() {
         setManualPlate(analysis.placa_normalizada);
         await handleLookupPlate(analysis.placa_normalizada, blob, analysis);
       } else {
-        setLookupError(analysis?.mensaje || "No se pudo detectar una placa desde la camara.");
+        setLookupError(analysis?.mensaje || "No se pudo detectar una placa en la captura.");
       }
     } catch (error) {
-      setLookupError(error?.response?.data?.detail || "No se pudo analizar la captura.");
+      setLookupError(error?.response?.data?.detail || "Error al analizar la captura de la cámara. Intenta de nuevo.");
     } finally {
       setLookupLoading(false);
       stopCamera();
@@ -823,22 +902,22 @@ function UploadPlate() {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          minHeight: "55vh",
-          padding: "2rem"
+          minHeight: "35vh",
+          padding: "1rem"
         }}>
-          <h2 style={{ color: "var(--color-primary)", marginBottom: "0.5rem", fontSize: "1.8rem", textAlign: "center" }}>
+          <h2 style={{ color: "var(--color-primary)", marginBottom: "0.25rem", fontSize: "1.4rem", textAlign: "center" }}>
             Selecciona una opción
           </h2>
-          <p className="muted-text" style={{ marginBottom: "2.5rem", fontSize: "1.1rem", textAlign: "center" }}>
+          <p className="muted-text" style={{ marginBottom: "1.5rem", fontSize: "0.9rem", textAlign: "center" }}>
             Elige el método de detección de placas para comenzar el control de acceso
           </p>
 
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: "2rem",
+            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            gap: "1.25rem",
             width: "100%",
-            maxWidth: "700px"
+            maxWidth: "600px"
           }}>
             <button
               type="button"
@@ -848,37 +927,37 @@ function UploadPlate() {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                padding: "2.5rem 1.5rem",
-                borderRadius: "20px",
+                padding: "1.5rem 1.25rem",
+                borderRadius: "12px",
                 border: "2px solid rgba(21, 62, 117, 0.15)",
                 background: "white",
                 color: "var(--color-primary)",
                 cursor: "pointer",
                 transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                boxShadow: "0 10px 25px rgba(21, 62, 117, 0.05)"
+                boxShadow: "0 6px 15px rgba(21, 62, 117, 0.04)"
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-5px)";
+                e.currentTarget.style.transform = "translateY(-3px)";
                 e.currentTarget.style.borderColor = "var(--color-primary)";
                 e.currentTarget.style.background = "#f8fafc";
-                e.currentTarget.style.boxShadow = "0 15px 30px rgba(21, 62, 117, 0.1)";
+                e.currentTarget.style.boxShadow = "0 10px 20px rgba(21, 62, 117, 0.08)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
                 e.currentTarget.style.borderColor = "rgba(21, 62, 117, 0.15)";
                 e.currentTarget.style.background = "white";
-                e.currentTarget.style.boxShadow = "0 10px 25px rgba(21, 62, 117, 0.05)";
+                e.currentTarget.style.boxShadow = "0 6px 15px rgba(21, 62, 117, 0.04)";
               }}
             >
-              <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-primary)", marginBottom: "1.2rem" }}>
+              <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-primary)", marginBottom: "0.85rem" }}>
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
-              <span style={{ fontSize: "1.3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
+              <span style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "0.35rem" }}>
                 Subir Imagen de Placa
               </span>
-              <span style={{ fontSize: "0.9rem", color: "#6b7280", textAlign: "center", lineHeight: "1.4" }}>
+              <span style={{ fontSize: "0.82rem", color: "#6b7280", textAlign: "center", lineHeight: "1.4" }}>
                 Carga un archivo local o toma una fotografía instantánea
               </span>
             </button>
@@ -891,36 +970,36 @@ function UploadPlate() {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                padding: "2.5rem 1.5rem",
-                borderRadius: "20px",
+                padding: "1.5rem 1.25rem",
+                borderRadius: "12px",
                 border: "2px solid rgba(21, 62, 117, 0.15)",
                 background: "white",
                 color: "var(--color-primary)",
                 cursor: "pointer",
                 transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                boxShadow: "0 10px 25px rgba(21, 62, 117, 0.05)"
+                boxShadow: "0 6px 15px rgba(21, 62, 117, 0.04)"
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-5px)";
+                e.currentTarget.style.transform = "translateY(-3px)";
                 e.currentTarget.style.borderColor = "var(--color-primary)";
                 e.currentTarget.style.background = "#f8fafc";
-                e.currentTarget.style.boxShadow = "0 15px 30px rgba(21, 62, 117, 0.1)";
+                e.currentTarget.style.boxShadow = "0 10px 20px rgba(21, 62, 117, 0.08)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.transform = "translateY(0)";
                 e.currentTarget.style.borderColor = "rgba(21, 62, 117, 0.15)";
                 e.currentTarget.style.background = "white";
-                e.currentTarget.style.boxShadow = "0 10px 25px rgba(21, 62, 117, 0.05)";
+                e.currentTarget.style.boxShadow = "0 6px 15px rgba(21, 62, 117, 0.04)";
               }}
             >
-              <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-primary)", marginBottom: "1.2rem" }}>
+              <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-primary)", marginBottom: "0.85rem" }}>
                 <path d="M23 7l-7 5 7 5V7z" />
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
-              <span style={{ fontSize: "1.3rem", fontWeight: "bold", marginBottom: "0.5rem" }}>
+              <span style={{ fontSize: "1.1rem", fontWeight: "bold", marginBottom: "0.35rem" }}>
                 Usar Cámara en Vivo
               </span>
-              <span style={{ fontSize: "0.9rem", color: "#6b7280", textAlign: "center", lineHeight: "1.4" }}>
+              <span style={{ fontSize: "0.82rem", color: "#6b7280", textAlign: "center", lineHeight: "1.4" }}>
                 Escaneo y reconocimiento automático en tiempo real
               </span>
             </button>
@@ -1278,7 +1357,7 @@ function UploadPlate() {
                 Zona: <strong>{autoAccessLog.zone}</strong>
               </p>
               <p style={{ color: "#6b7280", margin: "0.25rem 0 0", fontSize: "1.1rem" }}>
-                {new Date(autoAccessLog.timestamp).toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                {new Date(autoAccessLog.timestamp).toLocaleTimeString("es-BO", { timeZone: "America/La_Paz", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </p>
               {autoAccessLog.media_status === "PENDING" && (
                 <p className="muted-text" style={{ marginTop: "0.75rem" }}>Evidencia guardada localmente, pendiente de sincronización.</p>

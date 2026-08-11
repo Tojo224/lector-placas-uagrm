@@ -274,6 +274,7 @@ async def create_vehicle(vehicle_in: VehiculoCreate, db: AsyncSession = Depends(
     new_vehicle = Vehiculo(
         placa=vehicle_in.placa.upper().strip(),
         color=vehicle_in.color.strip(),
+        color_hex=vehicle_in.color_hex,
         marca_id=vehicle_in.marca_id,
         tipo_vehiculo_id=vehicle_in.tipo_vehiculo_id,
         propietario_usuario_id=vehicle_in.propietario_usuario_id,
@@ -378,6 +379,28 @@ async def delete_vehicle(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tienes permiso para eliminar este vehículo.",
         )
+
+    from app.db.models import EstadoCampus, Escaneado, SolicitudRegistroVehiculo
+    from sqlalchemy import update, delete
+
+    # 1. Eliminar el estado del campus asociado
+    await db.execute(
+        delete(EstadoCampus).where(EstadoCampus.vehiculo_id == vehicle_id)
+    )
+
+    # 2. Desasociar los registros de escaneo
+    await db.execute(
+        update(Escaneado)
+        .where(Escaneado.vehiculo_id == vehicle_id)
+        .values(vehiculo_id=None)
+    )
+
+    # 3. Desasociar solicitudes de registro de vehículos
+    await db.execute(
+        update(SolicitudRegistroVehiculo)
+        .where(SolicitudRegistroVehiculo.vehiculo_creado_id == vehicle_id)
+        .values(vehiculo_creado_id=None)
+    )
 
     await db.delete(vehicle)
     await db.commit()

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 import pytest
-from app.services.clip_color import CLIPColorResult
+from app.services.color_regressor import ColorRegressorResult
 from app.services.vehicle_color import HybridVehicleColorAnalyzer
 
 
@@ -52,8 +52,15 @@ def encoded_scene(color=(180, 70, 35)):
 
 
 def clip_result(color, confidence=.62, second=.18, reliable=True):
-    return CLIPColorResult(color if reliable else "DESCONOCIDO", confidence, "NEGRO", second,
-                           confidence - second, reliable)
+    return ColorRegressorResult(
+        valor=color if reliable else "DESCONOCIDO",
+        confianza=confidence,
+        color_hex="#123456",
+        segundo_valor="NEGRO",
+        segunda_confianza=second,
+        margen=confidence - second,
+        confiable=reliable,
+    )
 
 
 @pytest.mark.parametrize("color", ["AZUL", "BLANCO", "NEGRO", "GRIS"])
@@ -67,7 +74,7 @@ def test_weak_opencv_uses_clip_on_real_vehicle_crop(monkeypatch, color):
     result = analyzer.analyze(encoded_scene(), [130, 140, 190, 165])
 
     assert result.color_sugerido == color
-    assert result.metodo_color == ("HIBRIDO" if color == "NEGRO" else "CLIP")
+    assert result.metodo_color == ("HIBRIDO" if color == "NEGRO" else "REGRESOR")
     assert clip.crops[0].shape[:2] == (170, 280)
 
 

@@ -13,18 +13,18 @@ function Sidebar({ isOpen, onClose }) {
     links.push(
       { to: "/dashboard", label: "Dashboard" },
       { to: "/subir-placa", label: "Escanear Placas" },
-      { to: "/vehiculos", label: "Gestionar Vehiculos" },
+      { to: "/vehiculos", label: "Gestionar Vehículos" },
       { to: "/usuarios", label: "Gestionar Usuarios" },
       { to: "/dispositivos", label: "Gestionar Dispositivos" },
-      { to: "/accesos", label: "Control de Accesos" }
-      ,{ to: "/solicitudes-vehiculos", label: "Solicitudes de Vehiculos" }
+      { to: "/accesos", label: "Control de Accesos" },
+      { to: "/solicitudes-vehiculos", label: "Solicitudes de Vehículos" }
     );
   } else if (user?.rol === "OPERADOR") {
     links.push(
       { to: "/subir-placa", label: "Escanear Placas" },
-      { to: "/vehiculos", label: "Gestionar Vehiculos" },
-      { to: "/accesos", label: "Control de Accesos" }
-      ,{ to: "/solicitudes-vehiculos", label: "Solicitudes de Vehiculos" }
+      { to: "/vehiculos", label: "Gestionar Vehículos" },
+      { to: "/accesos", label: "Control de Accesos" },
+      { to: "/solicitudes-vehiculos", label: "Solicitudes de Vehículos" }
     );
   } else if (user?.rol === "DISPOSITIVO") {
     links.push(
@@ -33,7 +33,7 @@ function Sidebar({ isOpen, onClose }) {
   } else {
     links.push(
       { to: "/", label: "Inicio" },
-      { to: "/vehiculos", label: "Mis Vehiculos" },
+      { to: "/vehiculos", label: "Mis Vehículos" },
       { to: "/accesos", label: "Control de Accesos" }
     );
   }
@@ -72,10 +72,10 @@ function Sidebar({ isOpen, onClose }) {
                 textAlign: "left",
                 width: "calc(100% - 1.5rem)",
                 cursor: "pointer",
-                marginTop: "2rem",
                 color: "#f87171",
                 padding: "0.75rem 1rem",
-                margin: "2rem 0.75rem 0.75rem 0.75rem"
+                margin: "auto 0.75rem 0.75rem 0.75rem",
+                marginTop: "auto"
               }}
             >
               <span className="nav-text" style={{ fontWeight: "700" }}>Cerrar Sesión</span>

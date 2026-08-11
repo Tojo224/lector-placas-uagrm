@@ -4,7 +4,7 @@ import ConfirmModal from "../../components/ConfirmModal";
 import SearchBar from "../../components/SearchBar";
 import { listUsers, updateUserByAdmin, deleteUserByAdmin, registerUser, getMediaUrl } from "../../api/auth";
 
-const UserRow = memo(({ user, handleRoleToggle, handleStatusToggle, handleDelete, handleEdit, userPhotoUrl, onZoomImage }) => (
+const UserRow = memo(({ user, handleRoleToggle, handleStatusToggle, handleDelete, handleEdit, handleViewDetails, userPhotoUrl, onZoomImage }) => (
   <tr style={{ borderBottom: "1px solid rgba(21, 62, 117, 0.05)" }}>
     <td style={{ padding: "1rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
@@ -54,6 +54,14 @@ const UserRow = memo(({ user, handleRoleToggle, handleStatusToggle, handleDelete
       </span>
     </td>
     <td style={{ padding: "1rem", textAlign: "right", display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
+      <button
+        type="button"
+        onClick={() => handleViewDetails(user)}
+        title="Ver detalles"
+        style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f766e", color: "white", border: "none", cursor: "pointer" }}
+      >
+        <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>visibility</span>
+      </button>
       <button
         type="button"
         onClick={() => handleEdit(user)}
@@ -116,6 +124,7 @@ function Users() {
     rol: "OPERADOR",
     esta_activo: true
   });
+  const [viewingUser, setViewingUser] = useState(null);
 
   // Modal de confirmación
   const [confirmConfig, setConfirmConfig] = useState({
@@ -409,6 +418,7 @@ function Users() {
                   handleStatusToggle={handleStatusToggle}
                   handleDelete={handleDelete}
                   handleEdit={handleEdit}
+                  handleViewDetails={setViewingUser}
                   onZoomImage={setZoomedImage}
                 />
               ))}
@@ -443,7 +453,7 @@ function Users() {
               </button>
             </div>
 
-            <div className="form-block" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div className="details-grid">
               <label className="field-group">
                 <span>Nombre</span>
                 <input
@@ -547,7 +557,7 @@ function Users() {
               </button>
             </div>
 
-            <div className="form-block" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div className="details-grid">
               <label className="field-group">
                 <span>Nombre</span>
                 <input
@@ -620,6 +630,116 @@ function Users() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Modal de Detalles de Usuario */}
+      {viewingUser && (
+        <div className="modal-backdrop">
+          <div className="modal-card modal-large" style={{ maxWidth: "720px" }}>
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Detalle</p>
+                <h2>Información de la cuenta</h2>
+              </div>
+              <button type="button" className="ghost-button" onClick={() => setViewingUser(null)}>
+                Cerrar
+              </button>
+            </div>
+
+            <div className="form-block" style={{ padding: "0.5rem 0" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: "0.5rem" }}>
+                  <div style={{ width: "120px", height: "120px", borderRadius: "50%", background: "#f8fafc", border: "2px solid rgba(21, 62, 117, 0.15)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {userPhotoUrls[viewingUser.foto_id] ? (
+                      <img
+                        src={userPhotoUrls[viewingUser.foto_id]}
+                        alt={`Foto de ${viewingUser.nombre}`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", cursor: "pointer" }}
+                        onClick={() => setZoomedImage(userPhotoUrls[viewingUser.foto_id])}
+                        title="Ver foto completa"
+                      />
+                    ) : (
+                      <span className="muted-text" style={{ fontSize: "0.85rem" }}>Sin foto</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="details-grid" style={{ display: "grid", gap: "0.8rem" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.9rem 1rem", gridColumn: "1 / -1" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Nombre Completo</p>
+                    <p style={{ margin: 0, fontSize: "1.1rem", fontWeight: "700" }}>
+                      {viewingUser.nombre} {viewingUser.apellido_paterno} {viewingUser.apellido_materno || ""}
+                    </p>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Carnet de Identidad</p>
+                      <p style={{ margin: 0, fontWeight: "600", fontFamily: "monospace", color: "#153e75" }}>{viewingUser.carnet}</p>
+                    </div>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Rol en Sistema</p>
+                      <span style={{
+                        display: "inline-block",
+                        marginTop: "0.25rem",
+                        padding: "0.25rem 0.5rem",
+                        borderRadius: "4px",
+                        fontSize: "0.75rem",
+                        fontWeight: "bold",
+                        background: viewingUser.rol === "ADMINISTRADOR" ? "#ffe6e6" : viewingUser.rol === "OPERADOR" ? "#e6f2ff" : viewingUser.rol === "DISPOSITIVO" ? "#fef3c7" : "#e2e8f0",
+                        color: viewingUser.rol === "ADMINISTRADOR" ? "#b22234" : viewingUser.rol === "OPERADOR" ? "#153e75" : viewingUser.rol === "DISPOSITIVO" ? "#d97706" : "#475569"
+                      }}>
+                        {viewingUser.rol}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Estado de Cuenta</p>
+                      <span style={{
+                        display: "inline-block",
+                        marginTop: "0.25rem",
+                        padding: "0.25rem 0.5rem",
+                        borderRadius: "4px",
+                        fontSize: "0.75rem",
+                        fontWeight: "bold",
+                        background: viewingUser.esta_activo ? "#e6ffe6" : "#ffe6e6",
+                        color: viewingUser.esta_activo ? "green" : "red",
+                        border: `1px solid ${viewingUser.esta_activo ? "green" : "red"}`
+                      }}>
+                        {viewingUser.esta_activo ? "ACTIVO" : "INACTIVO"}
+                      </span>
+                    </div>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Identificador ID</p>
+                      <p style={{ margin: 0, fontFamily: "monospace", fontSize: "0.85rem", wordBreak: "break-all" }}>{viewingUser.id}</p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Fecha de Registro</p>
+                      <p style={{ margin: 0, fontWeight: "600", fontSize: "0.85rem" }}>
+                        {viewingUser.creado_el 
+                          ? new Date(viewingUser.creado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                          : "No disponible"}
+                      </p>
+                    </div>
+                    <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                      <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Última Actualización</p>
+                      <p style={{ margin: 0, fontWeight: "600", fontSize: "0.85rem" }}>
+                        {viewingUser.actualizado_el 
+                          ? new Date(viewingUser.actualizado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                          : "No disponible"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

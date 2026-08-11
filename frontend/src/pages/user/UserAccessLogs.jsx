@@ -98,8 +98,8 @@ function UserAccessLogs() {
               
               // Formateo de fecha y hora
               const dateObj = new Date(log.timestamp);
-              const formattedTime = dateObj.toLocaleTimeString("es-BO", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-              const formattedDate = dateObj.toLocaleDateString("es-BO", { day: "2-digit", month: "long", year: "numeric" });
+              const formattedTime = dateObj.toLocaleTimeString("es-BO", { timeZone: "America/La_Paz", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              const formattedDate = dateObj.toLocaleDateString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "long", year: "numeric" });
 
               return (
                 <div 

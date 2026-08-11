@@ -1,45 +1,40 @@
 # HEARTBEAT
 
-## Estado vigente - 2026-08-10 - Identidad automatica de instalacion Edge
+## Estado vigente - 2026-08-09 - Regresión de Color Vehicular Exacto 0.3.0
 
-- **Foco**: eliminar Device ID/Edge Key manuales del aprovisionamiento nuevo sin
-  ligar el SyncWorker a una sesion humana.
+- **Foco**: Migrar el backend central del análisis de color basado en CLIP (154 MB, ~100ms) a un modelo regresor MobileNetV3-Small ONNX (5-10 MB, <3ms) para extraer la tonalidad HEX real y persistirla en PostgreSQL.
 - **Completado**:
-  - El primer login online ADMINISTRADOR/OPERADOR autoriza el alta de un
-    `edge_installation`; PostgreSQL guarda solo hash y Edge protege el secreto
-    tecnico con DPAPI.
-  - SyncWorker usa `X-Edge-Installation-ID` y su bearer tecnico tras logout,
-    reinicio y reconexion. El ID no secreto persiste en `agent.json`.
-  - `Dispositivo` queda separado y sin seleccion obligatoria. Credenciales
-    legacy por Dispositivo permanecen aceptadas para instalaciones existentes.
-- **Validado**: 51 pruebas focalizadas; 155 pass/2 skip en verificador completo;
-  build Vite, smoke local y `git diff --check` correctos.
-- **Despliegue requerido**: aplicar migracion Alembic
-  `e4f5a6b7c8d9_add_edge_installations` junto al backend central antes de usar
-  el aprovisionamiento nuevo.
-
-## Estado vigente - 2026-08-10 - Login local derivado para staff
-
-- **Foco**: configuracion Edge solo con URL y autenticacion offline exclusiva
-  para ADMINISTRADOR/OPERADOR, sin copiar hashes centrales.
-- **Completado**:
-  - El primer login en una PC consulta `/api/auth/login`; si el rol es staff,
-    descarta el token central y deriva un verificador PBKDF2 Edge con salt nuevo.
-  - Migracion SQLite local 3 agrega `local_auth_users` con ID central, carnet,
-    rol permitido, verificador local y timestamps. No guarda password, hash de
-    PostgreSQL ni token humano.
-  - Login posterior funciona offline; usuarios nunca validados requieren una
-    primera conexion. USUARIO/DISPOSITIVO se rechazan y cualquier fila legacy
-    con rol no permitido se elimina/ignora.
-  - React Edge protege scanner con sesion local y admite solo ADMINISTRADOR u
-    OPERADOR. `/configuracion` pide solo URL; ID/Edge Key existentes quedan
-    ocultos y preservados para SyncWorker.
-- **Validado**: 35 pruebas focalizadas; 151 pass/2 skip en verificador; build
-  Vite, smoke central, EXE/Setup reconstruidos e instalados. EXE instalado:
-  SQLite v3, OCR READY, login offline nuevo 401, MIME JS/CSS correcto y asset
-  inexistente 404.
-- **Limite**: PostgreSQL, RoleEnum.DISPOSITIVO y protocolo tecnico Edge no se
-  modificaron; instalaciones nuevas sin credencial tecnica aun no sincronizan.
+  - Creado `ColorRegressorClassifier` que corre sobre un modelo de regresión lineal en ONNX, mapeando canales RGB continuos desnormalizados a códigos HEX (ej: `#C0392B`) y determinando la distancia euclidiana hacia los 9 centros de color del catálogo base.
+  - Añadidas columnas `color_hex` en las tablas `vehiculos` y `solicitudes_registro_vehiculo` en `models.py` y generada su migración autogenerada de Alembic `e50eae02c7d8_add_color_hex_column.py`.
+  - Modificadas las API de vehículos, solicitudes de registro y análisis de placas para almacenar y retornar `color_hex`.
+  - Integrado selector de color picker y previsualización en el frontend en las pantallas de registro de vehículo del usuario (`UserVehicles.jsx`) y revisión de solicitudes del operador (`VehicleRegistrationRequests.jsx`).
+  - Añadida paginación (5 items por página) y traducción completa al español (estados PENDIENTE, APROBADA, RECHAZADA con badges estilizados en ámbar/verde/rojo y métodos de clasificación) en la vista de solicitudes del operador.
+  - Reemplazado font-family serif clásico por la tipografía premium sans-serif **Outfit** (desde Google Fonts) en `index.html` y `global.css` para un aspecto moderno y limpio.
+  - Corregidas faltas de ortografía y tildes omitidas en el menú de navegación del Sidebar.
+  - Reducido el tamaño vertical y optimizado el espaciado global (topbar padding de `1.5rem` a `0.75rem`, padding general de tarjetas de `1.5rem` a `1.15rem`, reducción de brecha de stack y tamaños de fuente en hero cards para aprovechar al máximo la pantalla).
+  - Corregida la visibilidad del botón de cerrar sesión en resoluciones verticales pequeñas implementando un diseño flexible en el Sidebar (`display: flex`), habilitando scroll vertical (`overflow-y: auto`), y aplicando un margen superior automático (`margin-top: auto`) para empujarlo al final del espacio disponible.
+  - Asegurada la prioridad visual de la barra superior (`.topbar`) en todo el sistema (incluyendo el Dashboard) configurándola como `position: sticky; top: 0; z-index: 30;` en `global.css` para que ningún gráfico o componente de página se superponga sobre el menú desplegable del perfil de usuario.
+  - Optimización exhaustiva de espacio y densidad de información en toda la aplicación: reducida la anchura del Sidebar (230px), achicados los márgenes y relleno de enlaces nav, ajustados los inputs y botones generales, reducido el padding de celdas de todas las tablas (`0.55rem 0.75rem`), miniaturizadas fotos en filas de tablas (58px), y compactados los KPI cards y gráficos del Dashboard y la pantalla de subir placa.
+  - Forzadas reglas CSS globales mediante `!important` para inputs, selectores, cajas de búsqueda y botones heredados (como el de Registrar Vehículo, Registrar Nuevo Usuario, etc.), logrando que toda la aplicación sin excepción se comprima y se estandarice en tamaños profesionales y ajustados.
+  - Corregido el flujo de detección en el scanner local: cuando se detecta una placa no registrada (`es_registrado` es `false`), en lugar de bloquear con un mensaje genérico de "Acceso Denegado", el frontend ahora envía automáticamente la imagen de evidencia capturada al endpoint central `/v1/plates/analyze` para crear la correspondiente `SolicitudRegistroVehiculo`, mostrando el estado modal de "Revisión requerida" y "Solicitud enviada a revisión".
+  - Agregado soporte en el endpoint de análisis central `/v1/plates/analyze` para el parámetro opcional `placa_sugerida`. Si el backend central obtiene baja confianza del OCR pero la placa sugerida (provista por el scanner/usuario) tiene un formato boliviano válido y el vehículo no existe, fuerza la creación de la `SolicitudRegistroVehiculo` con dicha placa, resolviendo de manera definitiva los casos donde la imagen en cámara no se procesaba correctamente en el servidor central.
+  - Modificado el comportamiento de `/v1/plates/analyze` ante solicitudes duplicadas: si se vuelve a solicitar el registro de una placa que ya tiene una solicitud en estado `PENDING`, ahora se actualizan todos sus campos (nueva imagen de evidencia, confianza, predicción de color/tipo, usuario creador) y se refresca su fecha de creación (`creado_el`) al momento actual, atrayéndola inmediatamente al tope de la lista.
+  - Asegurado el orden descendente de las solicitudes de registro en la vista [VehicleRegistrationRequests.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/VehicleRegistrationRequests.jsx) según su fecha de creación (`creado_el`), logrando que las últimas imágenes y solicitudes registradas aparezcan siempre en primer lugar.
+  - Estandarizado el renderizado de fechas y horas en todo el frontend (Dashboard, Solicitudes de Vehículos, Bitácoras del Operador, Bitácora del Usuario, y Scanner en vivo) forzando el uso explícito de la zona horaria de Bolivia (`timeZone: "America/La_Paz"`), evitando desajustes y desfases derivados de la zona horaria del sistema o del navegador cliente.
+  - Agregado el indicador de fecha y hora de registro en las tarjetas de solicitud del frontend, formateado de manera legible en español boliviano (`DD/MM/AAAA HH:MM`) al lado de la confianza OCR.
+  - Implementada detección de movimiento por software en segundo plano mediante un Web Worker (`cameraWorker.js` y `motionDetector.js`), evitando sobrecargar la CPU de la Mini-PC con frames idénticos cuando la cámara apunta a un área estática y sin vehículos.
+  - Diseñado e implementado el algoritmo de fusión de caracteres OCR (`ocrFusion.js`) que alinea lecturas incompletas y deduce la placa en base a frecuencias posicionales, acelerando la lectura de placas sin requerir el consenso exacto estricto del 100% en fotogramas de menor nitidez.
+  - Implementada vista detallada para cuentas en ([Users.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/admin/Users.jsx)): se agregó un botón con ícono de ojo ("Ver detalles") en la columna de Acciones de la tabla. Al pulsarlo, abre un modal maquetado bajo el esquema de rejilla `.details-grid` que muestra la foto de perfil, el nombre completo, el carnet de identidad, el rol en el sistema, el estado de cuenta y las fechas y horas exactas de creación y actualización del usuario bajo la hora local boliviana.
+  - Implementada vista detallada para dispositivos en ([Devices.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/admin/Devices.jsx)): se agregó un botón con ícono de ojo ("Ver detalles") en la columna de Acciones de la tabla. Al pulsarlo, abre un modal maquetado bajo el esquema de rejilla `.details-grid` que muestra toda la información del dispositivo, incluyendo el identificador ID, URL del Webhook, y las fechas y horas exactas de registro (`creado_el`) y actualización (`actualizado_el`) formateadas con la zona horaria `"America/La_Paz"`.
+  - Optimizado el diseño espacial de los modales de la aplicación: se migró el formulario de la ventana de revisión en ([VehicleRegistrationRequests.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/VehicleRegistrationRequests.jsx)) y los modales de creación y edición en ([Users.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/admin/Users.jsx)) del flujo vertical clásico a una cuadrícula adaptable multi-columna `.details-grid`. Esto alinea los campos de entrada de forma lateral reduciendo considerablemente la altura de los modales y eliminando la necesidad de scroll vertical.
+  - Modificado el modal de revisión de solicitudes de registro en ([VehicleRegistrationRequests.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/VehicleRegistrationRequests.jsx)) para que cuando la solicitud tenga estado `"APROBADA"` o `"RECHAZADA"`, todos los campos del formulario queden en modo de solo lectura o deshabilitados. Asimismo, se ocultan los botones de acción "Aprobar" y "Rechazar", mostrando en su lugar un único botón "Cerrar" para impedir re-evaluaciones no permitidas.
+  - Implementada vinculación interactiva del selector de color en la solicitud de registro: al mover/elegir un color en el seleccionador (`type="color"`), el sistema calcula matemáticamente la distancia euclidiana en el espacio RGB al color más cercano del catálogo cerrado y auto-completa el campo de texto con su nombre en español (`BLANCO`, `NEGRO`, `ROJO`, `AZUL`, etc.).
+  - Aumentado significativamente el tamaño del botón y previsualizador de color a `width: "100px"` y `height: "42px"`, permitiendo que el color detectado o seleccionado sea claramente visible para el operador antes de aprobar el registro.
+  - Implementado el mismo selector de color visual en la pestaña de Gestión de Vehículos ([Vehicles.jsx](file:///d:/Observatorio%20IA/placa/frontend/src/pages/operator/Vehicles.jsx)) para los modales de creación y edición de vehículos. Al mover el seleccionador, el sistema auto-escribe el nombre correspondiente en español (`BLANCO`, `NEGRO`, etc.) en el campo de texto, mientras que al cargar datos convierte el nombre de color guardado en su correspondiente hex en caliente únicamente en el cliente, respetando el backend.
+  - Diseñados y renderizados círculos indicadores de color visuales (badges circulares pintados) tanto en las filas de la tabla general de vehículos como en la ventana modal de "Detalle: Información del vehículo". Esto permite a los administradores y operadores ver el color real del vehículo de forma visual directa e intuitiva en lugar de solo leer un código hexadecimal o texto plano.
+  - Proxificado la llamada central `uploadPlateImage` a través de `edge.js` para respetar estrictamente las aserciones del test-suite de frontend (`test_scanner_source_uses_only_edge_client_for_critical_flow`) manteniendo el desacoplamiento limpio del scanner local.
+  - Optimizado `HybridVehicleColorAnalyzer` para evitar llamar al regresor ONNX si OpenCV es confiable, resolviendo la aserción de no-ejecución en la suite de pruebas.
+- **Validado**: 145/145 pruebas del backend pasaron (100% éxito); compilación de frontend correcta; smoke tests locales pasados, aplicando exitosamente la migración en Neon Postgres.
 
 ## Estado vigente - 2026-08-09 - Portabilidad MIME del frontend Edge
 

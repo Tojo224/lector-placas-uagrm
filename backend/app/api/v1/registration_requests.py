@@ -36,7 +36,12 @@ async def list_requests(db: AsyncSession = Depends(get_db), _: Usuario = Depends
 
 @router.post("/{request_id}/approve", response_model=SolicitudRegistroResponse)
 async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, db: AsyncSession = Depends(get_db), reviewer: Usuario = Depends(require_staff)):
-    request = await db.scalar(select(SolicitudRegistroVehiculo).where(SolicitudRegistroVehiculo.id == request_id).with_for_update())
+    request = await db.scalar(
+        select(SolicitudRegistroVehiculo)
+        .options(selectinload(SolicitudRegistroVehiculo.tipo_sugerido))
+        .where(SolicitudRegistroVehiculo.id == request_id)
+        .with_for_update()
+    )
     if not request: raise HTTPException(404, "Solicitud no encontrada")
     if request.estado != SolicitudRegistroEstadoEnum.PENDING: raise HTTPException(409, "La solicitud ya fue revisada")
     plate = normalize_plate_text(payload.placa or request.placa_sugerida)
@@ -48,9 +53,10 @@ async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, d
         raise HTTPException(422, "El propietario debe ser un usuario regular activo")
     if not await db.get(Marca, payload.marca_id): raise HTTPException(422, "Marca no encontrada")
     if not await db.get(TipoVehiculo, payload.tipo_vehiculo_id): raise HTTPException(422, "Tipo de vehiculo no encontrado")
-    vehicle = Vehiculo(placa=plate, color=payload.color.strip(), marca_id=payload.marca_id, tipo_vehiculo_id=payload.tipo_vehiculo_id, propietario_usuario_id=payload.propietario_usuario_id, foto_id=request.imagen_id)
+    vehicle = Vehiculo(placa=plate, color=payload.color.strip(), color_hex=payload.color_hex, marca_id=payload.marca_id, tipo_vehiculo_id=payload.tipo_vehiculo_id, propietario_usuario_id=payload.propietario_usuario_id, foto_id=request.imagen_id)
     db.add(vehicle); await db.flush()
     request.estado = SolicitudRegistroEstadoEnum.APPROVED; request.revisado_por_usuario_id = reviewer.id; request.vehiculo_creado_id = vehicle.id; request.revisado_el = datetime.now(timezone.utc)
+    request.color_hex = payload.color_hex
     await db.commit(); await db.refresh(request)
     return request
 
@@ -58,6 +64,7 @@ async def approve_request(request_id: UUID, payload: SolicitudRegistroApprove, d
 async def reject_request(request_id: UUID, payload: SolicitudRegistroReject, db: AsyncSession = Depends(get_db), reviewer: Usuario = Depends(require_staff)):
     request = await db.scalar(
         select(SolicitudRegistroVehiculo)
+        .options(selectinload(SolicitudRegistroVehiculo.tipo_sugerido))
         .where(SolicitudRegistroVehiculo.id == request_id)
         .with_for_update()
     )

@@ -133,6 +133,7 @@ class PlatesAPITests(unittest.TestCase):
             color_sugerido="AZUL",
             confianza_color=0.81,
             metodo_color="HIBRIDO",
+            color_hex="#123456",
         )
         image = np.zeros((30, 50, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)

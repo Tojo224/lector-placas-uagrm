@@ -45,7 +45,7 @@ from app.api.v1.registration_requests import router as registration_requests_rou
 from app.api.v1.vehicles import router as vehicles_router
 from app.config.settings import settings
 from app.db.session import database_target
-from app.services.clip_color import CLIPColorClassifier
+from app.services.color_regressor import ColorRegressorClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ async def bootstrap_production_database() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Inicializa FastALPR/FastPlateOCR una sola vez."""
     # Ejecutar migraciones y bootstrap
-    run_db_migrations()
+    await asyncio.to_thread(run_db_migrations)
     await bootstrap_production_database()
 
     target = database_target()
@@ -165,10 +165,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             conf_thresh=settings.VEHICLE_DETECTOR_CONFIDENCE,
             providers=[settings.FAST_ALPR_EXECUTION_PROVIDER],
         )
-        app.state.clip_color_classifier = CLIPColorClassifier()
-        logger.info("Color vehicular listo: OpenCV + CLIP local, detector=%s", settings.VEHICLE_DETECTOR_MODEL)
+        app.state.clip_color_classifier = ColorRegressorClassifier()
+        logger.info("Color vehicular listo: OpenCV + Regresor MobileNetV3 local, detector=%s", settings.VEHICLE_DETECTOR_MODEL)
     except Exception:
-        logger.exception("Detector vehicular/CLIP no pudo inicializarse")
+        logger.exception("Detector vehicular/Regresor de color no pudo inicializarse")
 
     app.state.ocr_engine_name = "fast_alpr" if app.state.fast_alpr_engine is not None else "unavailable"
     yield

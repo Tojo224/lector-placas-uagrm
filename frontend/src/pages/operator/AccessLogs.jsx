@@ -181,7 +181,7 @@ function AccessLogs() {
             {currentLogs.map((log) => (
               <tr key={log.id} style={{ borderBottom: "1px solid rgba(21, 62, 117, 0.05)" }}>
                 <td style={{ padding: "1rem", fontWeight: "bold" }}>
-                  {new Date(log.timestamp).toLocaleString("es-BO", { hour12: false })}
+                  {new Date(log.timestamp).toLocaleString("es-BO", { timeZone: "America/La_Paz", hour12: false })}
                 </td>
                 <td style={{ padding: "1rem", fontFamily: "monospace", fontSize: "1.1rem", fontWeight: "bold", color: "#153e75" }}>
                   {log.vehicle?.license_plate}

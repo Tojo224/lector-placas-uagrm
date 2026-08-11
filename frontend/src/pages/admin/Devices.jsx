@@ -17,6 +17,7 @@ import { useAuth } from "../../hooks/useAuth";
 function Devices() {
   const { user } = useAuth();
   const isAdmin = user?.rol === "ADMINISTRADOR";
+  const isStaff = user?.rol === "ADMINISTRADOR" || user?.rol === "OPERADOR";
 
   const [activeTab, setActiveTab] = useState("devices"); // "devices" | "types"
 
@@ -34,6 +35,7 @@ function Devices() {
   // Formularios Modales
   const [creatingDevice, setCreatingDevice] = useState(null); // { nombre: "", ubicacion: "", tipo_dispositivo_id: "", esta_activo: true }
   const [editingDevice, setEditingDevice] = useState(null); // { id, nombre: "", ubicacion: "", tipo_dispositivo_id: "", esta_activo: true }
+  const [viewingDevice, setViewingDevice] = useState(null);
 
   const [creatingType, setCreatingType] = useState(null); // { nombre: "" }
   const [editingType, setEditingType] = useState(null); // { id, nombre: "" }
@@ -337,7 +339,7 @@ function Devices() {
                     <th style={{ padding: "1rem" }}>Ubicación</th>
                     <th style={{ padding: "1rem" }}>Tipo</th>
                     <th style={{ padding: "1rem" }}>Estado</th>
-                    {isAdmin && <th style={{ padding: "1rem", textAlign: "right" }}>Acciones</th>}
+                    {isStaff && <th style={{ padding: "1rem", textAlign: "right" }}>Acciones</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -373,25 +375,37 @@ function Devices() {
                           {d.esta_activo ? "Activo" : "Inactivo"}
                         </span>
                       </td>
-                      {isAdmin && (
+                      {isStaff && (
                         <td style={{ padding: "1rem", textAlign: "right", display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
                           <button
                             type="button"
-                            onClick={() => handleOpenEditDevice(d)}
-                            title="Editar dispositivo"
-                            style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--color-primary)", color: "white", border: "none", cursor: "pointer" }}
+                            onClick={() => setViewingDevice(d)}
+                            title="Ver detalles"
+                            style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "#0f766e", color: "white", border: "none", cursor: "pointer" }}
                           >
-                            <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>edit</span>
+                            <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>visibility</span>
                           </button>
-                          <button
-                            type="button"
-                            className="danger-button"
-                            onClick={() => handleDeleteDevice(d)}
-                            title="Eliminar dispositivo"
-                            style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "#e11d48", color: "white", border: "none", cursor: "pointer" }}
-                          >
-                            <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>delete</span>
-                          </button>
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditDevice(d)}
+                                title="Editar dispositivo"
+                                style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--color-primary)", color: "white", border: "none", cursor: "pointer" }}
+                              >
+                                <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="danger-button"
+                                onClick={() => handleDeleteDevice(d)}
+                                title="Eliminar dispositivo"
+                                style={{ width: "34px", height: "34px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", background: "#e11d48", color: "white", border: "none", cursor: "pointer" }}
+                              >
+                                <span className="material-symbols-rounded" style={{ fontSize: "18px" }}>delete</span>
+                              </button>
+                            </>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -708,6 +722,92 @@ function Devices() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Modal de Detalles de Dispositivo */}
+      {viewingDevice && (
+        <div className="modal-backdrop">
+          <div className="modal-card modal-large" style={{ maxWidth: "720px" }}>
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Detalle</p>
+                <h2>Información del dispositivo</h2>
+              </div>
+              <button type="button" className="ghost-button" onClick={() => setViewingDevice(null)}>
+                Cerrar
+              </button>
+            </div>
+
+            <div className="form-block" style={{ padding: "0.5rem 0" }}>
+              <div className="details-grid" style={{ display: "grid", gap: "0.8rem" }}>
+                <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.9rem 1rem", gridColumn: "1 / -1" }}>
+                  <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Nombre Identificador</p>
+                  <p style={{ margin: 0, fontSize: "1.1rem", fontWeight: "700" }}>{viewingDevice.nombre}</p>
+                </div>
+                
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Ubicación Física</p>
+                    <p style={{ margin: 0, fontWeight: "600" }}>{viewingDevice.ubicacion}</p>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Clase / Tipo</p>
+                    <p style={{ margin: 0, fontWeight: "600" }}>{viewingDevice.tipo?.nombre || "N/A"}</p>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Estado</p>
+                    <span style={{
+                      display: "inline-block",
+                      marginTop: "0.25rem",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "4px",
+                      fontSize: "0.75rem",
+                      fontWeight: "bold",
+                      background: viewingDevice.esta_activo ? "#e6ffe6" : "#ffe6e6",
+                      color: viewingDevice.esta_activo ? "green" : "red",
+                      border: `1px solid ${viewingDevice.esta_activo ? "green" : "red"}`
+                    }}>
+                      {viewingDevice.esta_activo ? "Habilitado y transmitiendo" : "Inactivo"}
+                    </span>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Identificador ID</p>
+                    <p style={{ margin: 0, fontFamily: "monospace", fontSize: "0.85rem", wordBreak: "break-all" }}>{viewingDevice.id}</p>
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.9rem 1rem", gridColumn: "1 / -1" }}>
+                  <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>URL de Webhook (Barrera / Actuador)</p>
+                  <p style={{ margin: 0, fontFamily: "monospace", fontSize: "0.85rem", wordBreak: "break-all" }}>
+                    {viewingDevice.webhook_url || "No configurada"}
+                  </p>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem", gridColumn: "1 / -1" }}>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Fecha de Registro</p>
+                    <p style={{ margin: 0, fontWeight: "600", fontSize: "0.85rem" }}>
+                      {viewingDevice.creado_el 
+                        ? new Date(viewingDevice.creado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                        : "No disponible"}
+                    </p>
+                  </div>
+                  <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
+                    <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Última Actualización</p>
+                    <p style={{ margin: 0, fontWeight: "600", fontSize: "0.85rem" }}>
+                      {viewingDevice.actualizado_el 
+                        ? new Date(viewingDevice.actualizado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                        : "No disponible"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

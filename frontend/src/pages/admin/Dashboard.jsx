@@ -83,32 +83,32 @@ const kpiCardBase = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
-  gap: "1rem",
-  borderRadius: "16px",
-  padding: "1.5rem",
+  gap: "0.5rem",
+  borderRadius: "12px",
+  padding: "0.85rem 1rem",
   background: "#ffffff",
-  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.06)",
-  border: "1px solid rgba(15, 23, 42, 0.08)",
+  boxShadow: "0 6px 20px rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15, 23, 42, 0.06)",
 };
 
 const kpiLabelStyle = {
   margin: 0,
-  fontSize: "0.85rem",
+  fontSize: "0.72rem",
   color: "#64748b",
   textTransform: "uppercase",
   letterSpacing: "0.08em",
 };
 
 const kpiValueStyle = {
-  fontSize: "2.5rem",
+  fontSize: "1.75rem",
   fontWeight: "800",
-  lineHeight: 1,
+  lineHeight: 1.1,
 };
 
 function BarChart({ data, labelKey, valueKey, title, icon, color = "#153e75" }) {
   const max = Math.max(...data.map(d => d[valueKey]), 1);
   return (
-    <div style={{ background: "white", borderRadius: "16px", padding: "1.5rem", boxShadow: "0 2px 12px rgba(21,62,117,0.08)", border: "1px solid rgba(21,62,117,0.08)" }}>
+    <div style={{ background: "white", borderRadius: "12px", padding: "1rem", boxShadow: "0 2px 10px rgba(21,62,117,0.06)", border: "1px solid rgba(21,62,117,0.06)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.2rem" }}>
         <span style={{ color, display: "flex", alignItems: "center" }}>{icon}</span>
         <h4 style={{ margin: 0, color: "#153e75", fontSize: "0.95rem", fontWeight: 700 }}>{title}</h4>
@@ -162,7 +162,7 @@ function DonutChart({ segments, title, icon }) {
   });
 
   return (
-    <div style={{ background: "white", borderRadius: "16px", padding: "1.5rem", boxShadow: "0 2px 12px rgba(21,62,117,0.08)", border: "1px solid rgba(21,62,117,0.08)" }}>
+    <div style={{ background: "white", borderRadius: "12px", padding: "1rem", boxShadow: "0 2px 10px rgba(21,62,117,0.06)", border: "1px solid rgba(21,62,117,0.06)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
         <span style={{ color: "#153e75", display: "flex", alignItems: "center" }}>{icon}</span>
         <h4 style={{ margin: 0, color: "#153e75", fontSize: "0.95rem", fontWeight: 700 }}>{title}</h4>
@@ -282,7 +282,7 @@ function Dashboard() {
     d.setDate(d.getDate() - (6 - i));
     const key = d.toISOString().slice(0, 10);
     return {
-      label: d.toLocaleDateString("es-BO", { weekday: "short", day: "numeric" }),
+      label: d.toLocaleDateString("es-BO", { timeZone: "America/La_Paz", weekday: "short", day: "numeric" }),
       value: scans.filter(s => s.creado_el?.slice(0, 10) === key).length,
     };
   });
@@ -518,7 +518,7 @@ function Dashboard() {
                     )}
                   </td>
                   <td style={{ padding: "0.8rem", fontSize: "0.9rem" }}>
-                    {new Date(s.creado_el).toLocaleString("es-BO", { hour12: false })}
+                    {new Date(s.creado_el).toLocaleString("es-BO", { timeZone: "America/La_Paz", hour12: false })}
                   </td>
                   <td style={{ padding: "0.8rem", fontFamily: "monospace", fontWeight: "bold" }}>
                     {s.placa_detectada || "N/A"}

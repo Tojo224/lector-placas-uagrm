@@ -177,7 +177,22 @@ function VehicleCard({ vehicle, onEdit, onDelete }) {
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: "0.3rem" }}>
               <span style={{ color: "#64748b" }}>Color</span>
-              <span style={{ color: "#1e293b", fontWeight: "500" }}>{vehicle.color || "N/A"}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                <span style={{ color: "#1e293b", fontWeight: "500" }}>{vehicle.color || "N/A"}</span>
+                {vehicle.color_hex && (
+                  <span 
+                    title={vehicle.color_hex}
+                    style={{ 
+                      display: "inline-block",
+                      width: "12px", 
+                      height: "12px", 
+                      borderRadius: "50%", 
+                      backgroundColor: vehicle.color_hex,
+                      border: "1px solid #cbd5e1"
+                    }} 
+                  />
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -302,6 +317,7 @@ function UserVehicles() {
     setCreatingVehicle({
       placa: "",
       color: "",
+      color_hex: "",
       marca_id: brands[0]?.id || "",
       tipo_vehiculo_id: types[0]?.id || "",
       propietario_usuario_id: user?.id,
@@ -329,6 +345,7 @@ function UserVehicles() {
           const newVehicle = await createVehicle({
             placa: plateVal,
             color: creatingVehicle.color,
+            color_hex: creatingVehicle.color_hex || null,
             marca_id: creatingVehicle.marca_id,
             tipo_vehiculo_id: creatingVehicle.tipo_vehiculo_id,
             propietario_usuario_id: user?.id
@@ -353,6 +370,7 @@ function UserVehicles() {
       id: v.id,
       placa: v.placa,
       color: v.color,
+      color_hex: v.color_hex || "",
       marca_id: v.marca_id,
       tipo_vehiculo_id: v.tipo_vehiculo_id,
       propietario_usuario_id: user?.id,
@@ -416,6 +434,7 @@ function UserVehicles() {
           await updateVehicle(editingVehicle.id, {
             placa: plateVal,
             color: editingVehicle.color,
+            color_hex: editingVehicle.color_hex || null,
             marca_id: editingVehicle.marca_id,
             tipo_vehiculo_id: editingVehicle.tipo_vehiculo_id,
             propietario_usuario_id: user?.id
@@ -603,18 +622,40 @@ function UserVehicles() {
 
                 <label className="field-group">
                   <span>Color</span>
-                  <input
-                    type="text"
-                    placeholder="Ej. Blanco, Azul"
-                    value={creatingVehicle.color}
-                    onChange={(event) =>
-                      setCreatingVehicle((current) => ({
-                        ...current,
-                        color: event.target.value
-                      }))
-                    }
-                    required
-                  />
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <input
+                      type="text"
+                      placeholder="Ej. Blanco, Azul"
+                      value={creatingVehicle.color}
+                      onChange={(event) =>
+                        setCreatingVehicle((current) => ({
+                          ...current,
+                          color: event.target.value
+                        }))
+                      }
+                      required
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={creatingVehicle.color_hex || "#cccccc"}
+                      onChange={(event) =>
+                        setCreatingVehicle((current) => ({
+                          ...current,
+                          color_hex: event.target.value
+                        }))
+                      }
+                      style={{ 
+                        width: "42px", 
+                        height: "42px", 
+                        padding: "2px", 
+                        border: "1px solid var(--color-border)", 
+                        borderRadius: "8px", 
+                        cursor: "pointer",
+                        flexShrink: 0
+                      }}
+                    />
+                  </div>
                 </label>
 
                 <label className="field-group">
@@ -730,17 +771,39 @@ function UserVehicles() {
 
                 <label className="field-group">
                   <span>Color</span>
-                  <input
-                    type="text"
-                    value={editingVehicle.color}
-                    onChange={(event) =>
-                      setEditingVehicle((current) => ({
-                        ...current,
-                        color: event.target.value
-                      }))
-                    }
-                    required
-                  />
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <input
+                      type="text"
+                      value={editingVehicle.color}
+                      onChange={(event) =>
+                        setEditingVehicle((current) => ({
+                          ...current,
+                          color: event.target.value
+                        }))
+                      }
+                      required
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={editingVehicle.color_hex || "#cccccc"}
+                      onChange={(event) =>
+                        setEditingVehicle((current) => ({
+                          ...current,
+                          color_hex: event.target.value
+                        }))
+                      }
+                      style={{ 
+                        width: "42px", 
+                        height: "42px", 
+                        padding: "2px", 
+                        border: "1px solid var(--color-border)", 
+                        borderRadius: "8px", 
+                        cursor: "pointer",
+                        flexShrink: 0
+                      }}
+                    />
+                  </div>
                 </label>
 
                 <label className="field-group">

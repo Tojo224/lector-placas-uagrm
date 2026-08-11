@@ -24,6 +24,56 @@ import { formatPlate, validatePlateForm } from "../../utils/formatters";
 import Pagination from "../../components/Pagination";
 import SearchBar from "../../components/SearchBar";
 
+const CATALOG_COLORS = {
+  "BLANCO": { r: 235, g: 235, b: 235, hex: "#EBEBEB" },
+  "NEGRO": { r: 28, g: 28, b: 28, hex: "#1C1C1C" },
+  "GRIS": { r: 105, g: 105, b: 105, hex: "#696969" },
+  "PLATEADO": { r: 178, g: 178, b: 178, hex: "#B2B2B2" },
+  "ROJO": { r: 190, g: 40, b: 40, hex: "#BE2828" },
+  "AZUL": { r: 35, g: 85, b: 180, hex: "#2355B4" },
+  "VERDE": { r: 65, g: 145, b: 65, hex: "#419141" },
+  "AMARILLO": { r: 220, g: 205, b: 35, hex: "#DCCD23" },
+  "MARRON": { r: 115, g: 75, b: 45, hex: "#734B2D" },
+};
+
+function hexToRgb(hex) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+}
+
+function getClosestColorName(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return "DESCONOCIDO";
+
+  let closestName = "DESCONOCIDO";
+  let minDistance = Infinity;
+
+  Object.entries(CATALOG_COLORS).forEach(([name, data]) => {
+    const dist = Math.sqrt(
+      Math.pow(rgb.r - data.r, 2) +
+      Math.pow(rgb.g - data.g, 2) +
+      Math.pow(rgb.b - data.b, 2)
+    );
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestName = name;
+    }
+  });
+
+  return closestName;
+}
+
+function getColorHex(colorNameOrHex) {
+  if (!colorNameOrHex) return "#cccccc";
+  if (colorNameOrHex.startsWith("#")) return colorNameOrHex;
+  const name = colorNameOrHex.toUpperCase().trim();
+  return CATALOG_COLORS[name]?.hex || "#cccccc";
+}
+
 function VehicleTablePhoto({ fotoId }) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -627,7 +677,19 @@ function Vehicles() {
                         {v.marca?.nombre || "N/A"}
                       </td>
                       <td style={{ padding: "1rem" }}>
-                        {v.color}
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <div
+                            style={{
+                              width: "16px",
+                              height: "16px",
+                              borderRadius: "50%",
+                              backgroundColor: getColorHex(v.color),
+                              border: "1px solid rgba(0,0,0,0.15)",
+                              flexShrink: 0
+                            }}
+                          />
+                          <span>{v.color}</span>
+                        </div>
                       </td>
                       <td style={{ padding: "1rem" }}>
                         {v.propietario ? `${v.propietario.nombre} ${v.propietario.apellido_paterno}` : "N/A"}
@@ -850,18 +912,42 @@ function Vehicles() {
 
                 <label className="field-group">
                   <span>Color</span>
-                  <input
-                    type="text"
-                    placeholder="Ej. Rojo"
-                    value={creatingVehicle.color}
-                    onChange={(event) =>
-                      setCreatingVehicle((current) => ({
-                        ...current,
-                        color: event.target.value
-                      }))
-                    }
-                    required
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <input
+                      type="text"
+                      placeholder="Ej. Rojo"
+                      value={creatingVehicle.color}
+                      onChange={(event) =>
+                        setCreatingVehicle((current) => ({
+                          ...current,
+                          color: event.target.value.toUpperCase()
+                        }))
+                      }
+                      required
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={getColorHex(creatingVehicle.color)}
+                      onChange={(event) => {
+                        const hex = event.target.value;
+                        const closest = getClosestColorName(hex);
+                        setCreatingVehicle((current) => ({
+                          ...current,
+                          color: closest
+                        }));
+                      }}
+                      style={{
+                        width: "100px",
+                        height: "42px",
+                        padding: "2px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        flexShrink: 0
+                      }}
+                    />
+                  </div>
                 </label>
 
                 <label className="field-group">
@@ -1025,7 +1111,19 @@ function Vehicles() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.8rem" }}>
                     <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
                       <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Color</p>
-                      <p style={{ margin: 0, fontWeight: "600" }}>{viewingVehicle.color || "N/A"}</p>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem" }}>
+                        <div
+                          style={{
+                            width: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            backgroundColor: getColorHex(viewingVehicle.color),
+                            border: "1px solid rgba(0,0,0,0.15)",
+                            flexShrink: 0
+                          }}
+                        />
+                        <p style={{ margin: 0, fontWeight: "600" }}>{viewingVehicle.color || "N/A"}</p>
+                      </div>
                     </div>
                     <div style={{ background: "#f8fafc", border: "1px solid rgba(21, 62, 117, 0.12)", borderRadius: "10px", padding: "0.8rem 1rem" }}>
                       <p className="eyebrow" style={{ marginBottom: "0.25rem" }}>Carnet / Registro</p>
@@ -1118,17 +1216,41 @@ function Vehicles() {
 
                 <label className="field-group">
                   <span>Color</span>
-                  <input
-                    type="text"
-                    value={editingVehicle.color}
-                    onChange={(event) =>
-                      setEditingVehicle((current) => ({
-                        ...current,
-                        color: event.target.value
-                      }))
-                    }
-                    required
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <input
+                      type="text"
+                      value={editingVehicle.color}
+                      onChange={(event) =>
+                        setEditingVehicle((current) => ({
+                          ...current,
+                          color: event.target.value.toUpperCase()
+                        }))
+                      }
+                      required
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={getColorHex(editingVehicle.color)}
+                      onChange={(event) => {
+                        const hex = event.target.value;
+                        const closest = getClosestColorName(hex);
+                        setEditingVehicle((current) => ({
+                          ...current,
+                          color: closest
+                        }));
+                      }}
+                      style={{
+                        width: "100px",
+                        height: "42px",
+                        padding: "2px",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        flexShrink: 0
+                      }}
+                    />
+                  </div>
                 </label>
 
                 <label className="field-group">
