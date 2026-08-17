@@ -37,6 +37,7 @@ superseded por los items siguientes. Se conservan debajo solo como historial.
 - `COLOR-EDGE-SHARED-001` | `done` | Prioridad `alta` | Compartir RF-DETR/OpenCV entre central y Edge, empaquetar RF-DETR offline, alinear color_hex y rechazar el fallback dummy no entrenado | Dependencias: `COLOR-REGRESSOR-001`
 - `COLOR-CALIBRATION-001` | `blocked` | Prioridad `alta` | Evaluar precision selectiva con capturas propias de dia, noche, movimiento, reflejos y todos los colores | Dependencias: camaras y vehiculos reales
 - `COLOR-SIGLIP-001` | `pending` | Prioridad `baja` | Comparar CLIP contra SigLIP solo si el conjunto real justifica el costo adicional | Dependencias: `COLOR-CALIBRATION-001`
+- `BRAND-MODEL-001` | `done` | Prioridad `alta` | Conectar detector ONNX MobileNetV3 de Marca y Modelo (v4) al pipeline de inferencia vehicular | Dependencias: `TYPE-001`
 - `TYPE-001` | `done` | Prioridad `alta` | Sugerir Automovil/Motocicleta/Bus/Camion reutilizando una unica inferencia RF-DETR y asociacion conservadora | Dependencias: `COLOR-001`
 - `TYPE-DB-001` | `done` | Prioridad `alta` | Persistir ID relacionado, confianza y metodo sin duplicar nombre ni seleccionar automaticamente | Dependencias: `TYPE-001`
 - `TYPE-MIGRATION-001` | `done` | Prioridad `alta` | Aplicar y verificar Alembic `a0b1c2d3e4f5` en la nueva base Neon configurada | Dependencias: ninguna

@@ -1,5 +1,13 @@
 # MEMORY
 
+### 2026-08-17 - Integración de Detector de Marca y Modelo Vehicular ONNX (v4)
+
+- **Integración de Pesos Pre-Entrenados**: Conectado el modelo de clasificación de marca y modelo vehicular MobileNetV3 Large (`brand-model-v4-bolivia12.onnx` y `brand-model-v4-bolivia12.labels.json`, 12 clases vehiculares de Bolivia) del repositorio `Tatiana72499/uagrm-modelomarca-ai`.
+- **Servicio y Pipeline**: Creado `BrandModelClassifier` en `backend/app/services/vehicle_brand_model.py` que corre en memoria con `onnxruntime` en < 3 ms. Integrado en `inspect_vehicle` dentro de `plate_analysis.py` reutilizando la caja vehicular obtenida por RF-DETR.
+- **Contrato de API**: Actualizado `PlateAnalysisResponse` en `schemas/plate.py` y `api/v1/plates.py` para devolver `marca_sugerida`, `modelo_sugerido`, `marca_sugerida_id`, `confianza_marca_modelo` y `metodo_marca_modelo`.
+- **Portabilidad y Producción**: Actualizado `Dockerfile` con pre-descarga de artefactos en build para funcionamiento autónomo sin fallos de red.
+- **Validación Completa**: 155 tests pasados (100% de éxito), 0 fallos, build de Vite exitoso en 308 ms y smoke test local OK.
+
 ### 2026-08-11 - Corrección y Re-Entrenamiento Exitoso del Regresor de Color MobileNetV3-Small
 
 - **Corrección de Lógica de Evaluación (`quick_eval`)**: Se identificó y resolvió un bug crítico en `train_color_regressor.py` donde la lógica de evaluación generaba la clase real y el parche de carrocería en variables independientes. Tras corregirlo para deducir la clase real a partir de la distancia mínima del target al catálogo, el modelo reportó un **100.0% de precisión de clasificación** en el conjunto sintético.

@@ -1,0 +1,22 @@
+{
+  "model_version": "marca-modelo-mobilenetv3_large_100-20260815-v4",
+  "labels": [
+    "CHEVROLET__CAPTIVA",
+    "HYUNDAI__TUCSON",
+    "KIA__CERATO",
+    "KIA__SORENTO",
+    "NISSAN__QASHQAI",
+    "NISSAN__TIIDA",
+    "NISSAN__X_TRAIL",
+    "SUZUKI__ALTO",
+    "SUZUKI__JIMNY",
+    "TOYOTA__CAMRY",
+    "TOYOTA__COROLLA",
+    "TOYOTA__RAV4"
+  ],
+  "image_size": 224,
+  "architecture": "mobilenetv3_large_100",
+  "confidence_threshold": 0.7,
+  "minimum_margin": 0.1,
+  "artifact_sha256": "2c5f0c46243ef2dc2326cca86bf4eaafd050a421940ff7c32cf25cb202e035ba"
+}

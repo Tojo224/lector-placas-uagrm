@@ -169,9 +169,35 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.exception("Detector vehicular/color OpenCV no pudo inicializarse")
 
+    app.state.brand_model_classifier = None
+    try:
+        from app.services.vehicle_brand_model import BrandModelClassifier
+
+        model_path = Path(settings.BRAND_MODEL_ONNX_PATH)
+        labels_path = Path(settings.BRAND_MODEL_METADATA_PATH)
+        if not model_path.is_absolute():
+            # Intentar desde la raíz del proyecto o desde models/
+            candidate = PROJECT_ROOT.parent / model_path if not (PROJECT_ROOT / model_path).exists() else (PROJECT_ROOT / model_path)
+            model_path = candidate
+        if not labels_path.is_absolute():
+            candidate = PROJECT_ROOT.parent / labels_path if not (PROJECT_ROOT / labels_path).exists() else (PROJECT_ROOT / labels_path)
+            labels_path = candidate
+
+        if model_path.exists() and labels_path.exists():
+            app.state.brand_model_classifier = BrandModelClassifier(
+                model_path=model_path,
+                labels_path=labels_path,
+                providers=[settings.FAST_ALPR_EXECUTION_PROVIDER],
+            )
+            logger.info("Clasificador de Marca/Modelo ONNX listo: %s", model_path.name)
+        else:
+            logger.warning("Archivos de Marca/Modelo no encontrados en %s o %s", model_path, labels_path)
+    except Exception:
+        logger.exception("Clasificador de Marca/Modelo ONNX no pudo inicializarse")
+
     app.state.ocr_engine_name = "fast_alpr" if app.state.fast_alpr_engine is not None else "unavailable"
     yield
-    for state_name in ("fast_alpr_engine", "vehicle_detector", "ocr_engine_name"):
+    for state_name in ("fast_alpr_engine", "vehicle_detector", "brand_model_classifier", "ocr_engine_name"):
         if hasattr(app.state, state_name):
             delattr(app.state, state_name)
 

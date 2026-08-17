@@ -98,6 +98,11 @@ class PlatesAPITests(unittest.TestCase):
             "tipo_sugerido": None,
             "confianza_tipo": None,
             "metodo_tipo": None,
+            "marca_sugerida_id": None,
+            "marca_sugerida": None,
+            "modelo_sugerido": None,
+            "confianza_marca_modelo": None,
+            "metodo_marca_modelo": None,
         }
         image = np.zeros((20, 40, 3), dtype=np.uint8)
         ok, encoded = cv2.imencode(".jpg", image)

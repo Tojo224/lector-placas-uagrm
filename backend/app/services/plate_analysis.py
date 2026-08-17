@@ -13,7 +13,8 @@ class VehicleInspectionResult:
     color: Any | None
     vehicle_type: Any
     suggested_type_name: str | None
-    elapsed_ms: float
+    brand_model: Any | None = None
+    elapsed_ms: float = 0.0
 
 
 async def analyze_plate_bytes(
@@ -38,11 +39,16 @@ async def inspect_vehicle(
     vehicle_detector: Any,
     color_classifier: Any,
     type_catalog: Sequence[Any],
+    brand_classifier: Any = None,
+    brand_catalog: Sequence[Any] = (),
 ) -> VehicleInspectionResult:
-    """Reuse one vehicle detection for the current color and type suggestions."""
-    from app.services.vehicle_color import HybridVehicleColorAnalyzer
+    """Reuse one vehicle detection for color, type, and brand/model suggestions."""
+    from app.services.vehicle_brand_model import BrandModelClassifier
+    from app.services.vehicle_color import HybridVehicleColorAnalyzer, _crop_image
     from app.services.vehicle_detection import VehicleAssociationService
     from app.services.vehicle_type import VehicleTypeSuggester
+    import cv2
+    import numpy as np
 
     started_at = perf_counter()
     association = await run_in_threadpool(
@@ -63,6 +69,8 @@ async def inspect_vehicle(
         )
 
     color_result = None
+    brand_model_result = None
+
     if association is not None:
         color_result = await run_in_threadpool(
             HybridVehicleColorAnalyzer(vehicle_detector, color_classifier).analyze,
@@ -71,10 +79,22 @@ async def inspect_vehicle(
             association,
         )
 
+        if brand_classifier is not None:
+            image_np = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if image_np is not None:
+                crop = _crop_image(image_np, association.bbox)
+                brand_model_result = await run_in_threadpool(
+                    BrandModelClassifier.resolve_with_catalog,
+                    crop,
+                    brand_classifier,
+                    brand_catalog,
+                )
+
     return VehicleInspectionResult(
         color=color_result,
         vehicle_type=type_result,
         suggested_type_name=suggested_type_name,
+        brand_model=brand_model_result,
         elapsed_ms=(perf_counter() - started_at) * 1000,
     )
 

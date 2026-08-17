@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     OCR_ROI_WIDTH: int | None = None
     OCR_ROI_HEIGHT: int | None = None
 
+    # Brand and Model classification configuration
+    BRAND_MODEL_ONNX_PATH: str = "models/brand-model-v4-bolivia12.onnx"
+    BRAND_MODEL_METADATA_PATH: str = "models/brand-model-v4-bolivia12.labels.json"
+    BRAND_MODEL_CONFIDENCE_THRESHOLD: float = 0.70
+
     # Local camera agent configuration. The agent runs as a separate process.
     CAMERA_INDEX: int = 0
     CAMERA_RTSP_URL: str = ""

@@ -51,4 +51,9 @@ class PlateAnalysisResponse(BaseModel):
     tipo_sugerido: str | None = None
     confianza_tipo: float | None = None
     metodo_tipo: str | None = None
+    marca_sugerida_id: UUID | None = None
+    marca_sugerida: str | None = None
+    modelo_sugerido: str | None = None
+    confianza_marca_modelo: float | None = None
+    metodo_marca_modelo: str | None = None
 

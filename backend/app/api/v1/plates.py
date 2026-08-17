@@ -125,26 +125,33 @@ async def analyze_plate_endpoint(
     color_result = None
     type_result = VehicleTypeResult(None, 0.0, "DESCONOCIDO")
     suggested_type_name = None
+    brand_model_result = None
 
     # Una imagen estatica obtiene sugerencia aunque la placa ya este registrada,
     # el OCR requiera revision o no termine creando una solicitud. El modo
     # realtime evita ejecutar detector vehicular + OpenCV en cada frame.
     if not realtime and result_dict.get("plate_bbox"):
         vehicle_detector = getattr(request.app.state, "vehicle_detector", None)
+        brand_classifier = getattr(request.app.state, "brand_model_classifier", None)
         if vehicle_detector is not None:
             type_catalog = list((await db.execute(
                 select(TipoVehiculo).where(TipoVehiculo.esta_activo.is_(True))
             )).scalars().all())
+            from app.db.models import Marca
+            brand_catalog = list((await db.execute(select(Marca))).scalars().all())
             inspection = await inspect_vehicle(
                 image_bytes,
                 result_dict.get("plate_bbox"),
                 vehicle_detector,
                 None,
                 type_catalog,
+                brand_classifier,
+                brand_catalog,
             )
             color_result = inspection.color
             type_result = inspection.vehicle_type
             suggested_type_name = inspection.suggested_type_name
+            brand_model_result = getattr(inspection, "brand_model", None)
             logger.info(
                 "Analisis de placa: etapa=vehiculo elapsed_ms=%.1f realtime=%s",
                 inspection.elapsed_ms,
@@ -422,6 +429,11 @@ async def analyze_plate_endpoint(
         tipo_sugerido=suggested_type_name if not realtime else None,
         confianza_tipo=type_result.confianza_tipo if not realtime else None,
         metodo_tipo=type_result.metodo_tipo if not realtime else None,
+        marca_sugerida_id=brand_model_result.marca_sugerida_id if (brand_model_result and not realtime) else None,
+        marca_sugerida=brand_model_result.marca_sugerida if (brand_model_result and not realtime) else None,
+        modelo_sugerido=brand_model_result.modelo_sugerido if (brand_model_result and not realtime) else None,
+        confianza_marca_modelo=brand_model_result.confianza if (brand_model_result and not realtime) else None,
+        metodo_marca_modelo=brand_model_result.metodo if (brand_model_result and not realtime) else None,
         mensaje=("Vehiculo desconocido. Solicitud enviada a revision" if solicitud_id else result_dict.get("message"))
     )
     logger.info(

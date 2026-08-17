@@ -1,5 +1,12 @@
 # HEARTBEAT
 
+- **Estado vigente - 2026-08-17 - Integración de Detector de Marca y Modelo Vehicular ONNX (v4)**
+  - Integrado clasificador [BrandModelClassifier](file:///d:/Observatorio%20IA/placa/backend/app/services/vehicle_brand_model.py) basado en `onnxruntime` con los pesos pre-entrenados del modelo MobileNetV3 Large `brand-model-v4-bolivia12.onnx` y `brand-model-v4-bolivia12.labels.json` (12 clases vehiculares de Bolivia: Captiva, Tucson, Cerato, Sorento, Qashqai, Tiida, X-Trail, Alto, Jimny, Camry, Corolla, RAV4).
+  - Conectado a la inferencia del backend central en `main.py` y `plate_analysis.py`, reutilizando la caja vehicular obtenida por RF-DETR.
+  - Actualizado el endpoint `POST /api/v1/plates/analyze` y el esquema `PlateAnalysisResponse` con `marca_sugerida`, `modelo_sugerido`, `marca_sugerida_id`, `confianza_marca_modelo` y `metodo_marca_modelo`.
+  - Agregadas pruebas unitarias completas en `test_vehicle_brand_model.py`.
+  - Verificación determinista completa (`verify-project.ps1`): **155 pasadas**, 3 omitidas, 0 errores, build de Vite exitoso en 292 ms.
+
 - **Estado vigente - 2026-08-11 - Color central compartido con Edge & Cámaras IP**
 - **Modelo de Color Re-Entrenado y Corregido**:
   - Se re-entrenó el regresor MobileNetV3-Small utilizando el script `train_color_regressor.py`.
