@@ -331,6 +331,22 @@ textarea:focus {
   margin-top: 1rem;
 }
 
+.edge-camera-workspace {
+  min-height: calc(100vh + 8rem);
+  padding-bottom: 8rem;
+}
+
+@media (max-width: 700px) {
+  .edge-camera-workspace {
+    min-height: calc(100vh + 5rem);
+    padding-bottom: 5rem;
+  }
+
+  .edge-camera-workspace .camera-container {
+    height: clamp(520px, 82vh, 760px) !important;
+  }
+}
+
 .info-card h3,
 .form-block h4 {
   margin: 1.25rem 0 0.75rem;

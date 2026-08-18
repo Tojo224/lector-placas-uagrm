@@ -24,6 +24,24 @@
       "source": ".cache/open-image-models/rf-detr-nano-384-coco/rf-detr-nano-384-coco.onnx",
       "sha256": "fdcdd1c566ed4ab4d3700ca1ce6f03edadfec2a0655432e40e4c2734623feaec",
       "role": "RF-DETR vehicle association for shared color analysis"
+    },
+    {
+      "name": "brand-model-v4-bolivia12.onnx",
+      "source": "repo:models/brand-model-v4-bolivia12.onnx",
+      "sha256": "2c5f0c46243ef2dc2326cca86bf4eaafd050a421940ff7c32cf25cb202e035ba",
+      "role": "MobileNetV3 vehicle brand and model classifier"
+    },
+    {
+      "name": "brand-model-v4-bolivia12.onnx.data",
+      "source": "repo:models/brand-model-v4-bolivia12.onnx.data",
+      "sha256": "b13ca4df223ad9249419db1e38b424b46bbf083ff3a8519019058f5504245ab0",
+      "role": "External weights for the brand and model classifier"
+    },
+    {
+      "name": "brand-model-v4-bolivia12.labels.json",
+      "source": "repo:models/brand-model-v4-bolivia12.labels.json",
+      "sha256": "37ac49d4c4661efec440065a99c9db4b345a53a517f0458c20715b9a8b6f971c",
+      "role": "Labels and thresholds for the brand and model classifier"
     }
   ]
 }

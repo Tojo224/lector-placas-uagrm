@@ -1,5 +1,22 @@
 # MEMORY
 
+### 2026-08-18 - Cierre de integracion Edge marca/modelo y auditoria de estado
+
+- El agente Edge inicializa el clasificador MobileNetV3 de marca/modelo despues
+  del OCR, reutiliza el recorte vehicular de RF-DETR y expone readiness/error en
+  health. El contrato de analisis incluye marca, modelo, confianza y metodo.
+- El manifiesto y el build Windows incluyen el grafo ONNX, sus pesos externos y
+  etiquetas, todos verificados por SHA-256 desde rutas del repositorio.
+- `ProductConfigStore` rechaza el puerto Vite 5173 como URL del backend central;
+  configuraciones legacy invalidas conservan la identidad de instalacion pero
+  dejan la sincronizacion deshabilitada hasta corregir la URL.
+- La interfaz muestra la sugerencia de marca/modelo y reserva mayor altura para
+  el espacio de trabajo de camara en escritorio y movil.
+- Auditoria: `main` y `origin/main` estaban alineadas en `1d38302`; Alembic local
+  y Neon coinciden en la unica cabeza `f60718293a4b`; `alembic check` no encontro
+  cambios de esquema. `verify-project.ps1` termino con 157 pass, 3 skip y build
+  Vite correcto.
+
 ### 2026-08-17 - Integración de Detector de Marca y Modelo Vehicular ONNX (v4)
 
 - **Integración de Pesos Pre-Entrenados**: Conectado el modelo de clasificación de marca y modelo vehicular MobileNetV3 Large (`brand-model-v4-bolivia12.onnx` y `brand-model-v4-bolivia12.labels.json`, 12 clases vehiculares de Bolivia) del repositorio `Tatiana72499/uagrm-modelomarca-ai`.

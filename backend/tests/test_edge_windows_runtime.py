@@ -12,7 +12,7 @@ from edge_agent.app import create_edge_app
 from edge_agent.config import EdgeSettings
 from edge_agent.credentials import DeviceCredentialProvider
 from edge_agent.credentials import WindowsDpapiCredentialProvider
-from edge_agent.product_config import ProductConfigStore
+from edge_agent.product_config import ProductConfigStore, validate_central_url
 from edge_agent.engine import bundled_model_paths, vehicle_model_path
 from edge_agent.runtime import configure_offline_model_runtime
 
@@ -86,6 +86,36 @@ def test_product_config_contains_only_non_sensitive_values(tmp_path: Path):
     assert payload["central_url"] == "https://central.example"
     assert payload["device_id"] == "device-id"
     assert "key" not in " ".join(payload).lower()
+
+
+def test_product_config_rejects_vite_frontend_as_central_backend(tmp_path: Path):
+    store = ProductConfigStore(tmp_path)
+
+    with pytest.raises(ValueError, match="frontend Vite"):
+        store.save("https://localhost:5173")
+    with pytest.raises(ValueError, match="frontend Vite"):
+        validate_central_url("http://127.0.0.1:5173")
+
+
+def test_legacy_vite_url_disables_sync_without_losing_installation(tmp_path: Path):
+    store = ProductConfigStore(tmp_path)
+    store.path.parent.mkdir(parents=True)
+    store.path.write_text(
+        json.dumps({
+            "schema_version": 2,
+            "central_url": "https://localhost:5173",
+            "installation_id": "00000000-0000-4000-8000-000000000333",
+            "installation_provisioned": True,
+            "device_id": None,
+        }),
+        encoding="utf-8",
+    )
+
+    loaded = store.load()
+
+    assert loaded.central_url is None
+    assert loaded.installation_id == "00000000-0000-4000-8000-000000000333"
+    assert loaded.installation_provisioned is True
 
 
 def test_provisioned_installation_identity_survives_settings_reload(

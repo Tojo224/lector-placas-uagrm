@@ -3,27 +3,29 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from dataclasses import replace
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 import httpx
-from app.services.image_processing import ImageProcessingError
-from app.services.plate_analysis import analyze_plate_bytes, inspect_vehicle_color
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.datastructures import Headers
 from starlette.responses import Response
 from starlette.staticfiles import NotModifiedResponse
 from starlette.types import Scope
-from pydantic import BaseModel
 
+from app.services.image_processing import ImageProcessingError
+from app.services.plate_analysis import analyze_plate_bytes, inspect_vehicle_color
+from app.services.vehicle_brand_model import BrandModelClassifier
+from app.services.vehicle_color import _crop_image
 from edge_agent import __version__
 from edge_agent.cache import apply_snapshot
 from edge_agent.config import EdgeSettings
@@ -33,9 +35,13 @@ from edge_agent.credentials import (
 )
 from edge_agent.db import EdgeDatabase
 from edge_agent.db.repositories import ScanRepository
-from edge_agent.engine import create_color_engine, create_ocr_engine
-from edge_agent.media_spool import MediaSpool, MediaSpoolError
+from edge_agent.engine import (
+    create_brand_model_engine,
+    create_color_engine,
+    create_ocr_engine,
+)
 from edge_agent.local_auth import LocalAuthError, LocalAuthService
+from edge_agent.media_spool import MediaSpool, MediaSpoolError
 from edge_agent.offline_access import OfflineAccessService
 from edge_agent.product_config import ProductConfigStore, validate_central_url
 from edge_agent.sync import SyncWorker
@@ -150,6 +156,11 @@ def _ocr_response(result: dict[str, Any], outcome: dict[str, Any] | None = None)
         "color_hex": outcome.get("color_hex"),
         "confianza_color": outcome.get("confianza_color"),
         "metodo_color": outcome.get("metodo_color"),
+        "marca_sugerida_id": None,
+        "marca_sugerida": outcome.get("marca_sugerida"),
+        "modelo_sugerido": outcome.get("modelo_sugerido"),
+        "confianza_marca_modelo": outcome.get("confianza_marca_modelo"),
+        "metodo_marca_modelo": outcome.get("metodo_marca_modelo"),
         "tipo_sugerido_id": None,
         "tipo_sugerido": None,
         "confianza_tipo": None,
@@ -167,6 +178,7 @@ def create_edge_app(
     settings: EdgeSettings | None = None,
     engine_factory: Callable[[EdgeSettings], Any] = create_ocr_engine,
     color_engine_factory: Callable[[EdgeSettings], tuple[Any, Any]] | None = None,
+    brand_engine_factory: Callable[[EdgeSettings], Any] | None = None,
     credential_provider: DeviceCredentialProvider | None = None,
 ) -> FastAPI:
     edge_settings = settings or EdgeSettings.from_env()
@@ -176,7 +188,9 @@ def create_edge_app(
         data_dir
     )
     resolved_color_factory = color_engine_factory or create_color_engine
+    resolved_brand_factory = brand_engine_factory or create_brand_model_engine
     color_enabled = engine_factory is create_ocr_engine or color_engine_factory is not None
+    brand_enabled = engine_factory is create_ocr_engine or brand_engine_factory is not None
 
     async def replace_sync_worker(app: FastAPI, configured: EdgeSettings) -> None:
         if app.state.sync_worker:
@@ -259,9 +273,12 @@ def create_edge_app(
         app.state.sync_task = None
         app.state.ocr_task = None
         app.state.color_task = None
+        app.state.brand_task = None
         app.state.vehicle_detector = None
         app.state.color_classifier = None
         app.state.color_error = None
+        app.state.brand_model_classifier = None
+        app.state.brand_model_error = None
         app.state.local_auth = None
         try:
             database = EdgeDatabase(
@@ -330,6 +347,20 @@ def create_edge_app(
                 app.state.color_error = type(exc).__name__
                 logger.exception("El detector local de color no pudo inicializarse")
 
+        async def initialize_brand_model() -> None:
+            started = perf_counter()
+            try:
+                app.state.brand_model_classifier = await asyncio.to_thread(
+                    resolved_brand_factory, edge_settings
+                )
+                app.state.startup_timings["brand_model_load_ms"] = round(
+                    (perf_counter() - started) * 1000, 1
+                )
+                logger.info("Edge marca/modelo inicializado con ONNX MobileNetV3")
+            except Exception as exc:
+                app.state.brand_model_error = type(exc).__name__
+                logger.exception("El clasificador local de marca/modelo no pudo inicializarse")
+
         if edge_settings.initialize_ocr_in_background:
             app.state.ocr_task = asyncio.create_task(initialize_ocr())
             if color_enabled:
@@ -338,10 +369,18 @@ def create_edge_app(
                     await initialize_color()
 
                 app.state.color_task = asyncio.create_task(initialize_color_after_ocr())
+            if brand_enabled:
+                async def initialize_brand_after_ocr() -> None:
+                    await app.state.ocr_task
+                    await initialize_brand_model()
+
+                app.state.brand_task = asyncio.create_task(initialize_brand_after_ocr())
         else:
             await initialize_ocr()
             if color_enabled:
                 await initialize_color()
+            if brand_enabled:
+                await initialize_brand_model()
         yield
         if app.state.sync_worker:
             app.state.sync_worker.stop()
@@ -351,9 +390,12 @@ def create_edge_app(
             await app.state.ocr_task
         if app.state.color_task:
             await app.state.color_task
+        if app.state.brand_task:
+            await app.state.brand_task
         app.state.ocr_engine = None
         app.state.vehicle_detector = None
         app.state.color_classifier = None
+        app.state.brand_model_classifier = None
         app.state.scan_repository = None
         app.state.database = None
 
@@ -434,6 +476,29 @@ def create_edge_app(
                     "confianza_color": color.confianza_color,
                     "metodo_color": color.metodo_color,
                 })
+                if (
+                    color.vehicle_bbox is not None
+                    and app.state.brand_model_classifier is not None
+                ):
+                    import cv2
+                    import numpy as np
+
+                    image = cv2.imdecode(
+                        np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR
+                    )
+                    crop = _crop_image(image, color.vehicle_bbox) if image is not None else None
+                    brand_model = await asyncio.to_thread(
+                        BrandModelClassifier.resolve_with_catalog,
+                        crop,
+                        app.state.brand_model_classifier,
+                        (),
+                    )
+                    outcome.update({
+                        "marca_sugerida": brand_model.marca_sugerida,
+                        "modelo_sugerido": brand_model.modelo_sugerido,
+                        "confianza_marca_modelo": brand_model.confianza,
+                        "metodo_marca_modelo": brand_model.metodo,
+                    })
             logger.info(
                 "Edge color: elapsed_ms=%.1f method=%s",
                 (perf_counter() - color_started) * 1000,
@@ -559,6 +624,8 @@ def create_edge_app(
             "ocr_ready": ocr_ready,
             "color_ready": app.state.vehicle_detector is not None,
             "color_error": app.state.color_error,
+            "brand_model_ready": app.state.brand_model_classifier is not None,
+            "brand_model_error": app.state.brand_model_error,
             "database_ready": database_ready,
             "access_ready": ready and cache["valid"],
             "cache": cache,

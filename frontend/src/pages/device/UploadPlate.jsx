@@ -1028,7 +1028,7 @@ function UploadPlate() {
       )}
 
       {activeTab === "camera" && (
-        <div style={{ animation: "fadeIn 0.3s ease" }}>
+        <div className="edge-camera-workspace" style={{ animation: "fadeIn 0.3s ease" }}>
           {isStaff && (
             <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
               <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", backgroundColor: "#f1f5f9", padding: "4px", borderRadius: "8px" }}>
@@ -1150,7 +1150,7 @@ function UploadPlate() {
                 <div className="camera-container" style={{
                   position: "relative",
                   width: "100%",
-                  height: "75vh",
+                  height: "clamp(620px, 85vh, 920px)",
                   borderRadius: "16px",
                   overflow: "hidden",
                   border: "4px solid var(--color-primary)",
@@ -1588,6 +1588,15 @@ function UploadPlate() {
                     {analysisPreview.metodo_color && <> · Método: {analysisPreview.metodo_color}</>}
                   </p>
                 )}
+                {analysisPreview.marca_sugerida && (
+                  <p className="muted-text" style={{ marginTop: "0.5rem" }}>
+                    Vehículo sugerido: <strong>{analysisPreview.marca_sugerida} {analysisPreview.modelo_sugerido || ""}</strong>
+                    {analysisPreview.confianza_marca_modelo != null && (
+                      <> ({Math.round(analysisPreview.confianza_marca_modelo * 100)}%)</>
+                    )}
+                    {analysisPreview.metodo_marca_modelo && <> · Método: {analysisPreview.metodo_marca_modelo}</>}
+                  </p>
+                )}
                 {analysisPreview.metodo_tipo && (
                   <p className="muted-text" style={{ marginTop: "0.5rem" }}>
                     Tipo sugerido por RF-DETR: <strong>{analysisPreview.tipo_sugerido || "DESCONOCIDO"}</strong>
@@ -1784,6 +1793,15 @@ function UploadPlate() {
                       <> ({Math.round(analysisPreview.confianza_color * 100)}%)</>
                     )}
                     {analysisPreview.metodo_color && <> · Método: {analysisPreview.metodo_color}</>}
+                  </p>
+                )}
+                {analysisPreview.marca_sugerida && (
+                  <p className="muted-text" style={{ marginTop: "0.5rem" }}>
+                    Vehículo sugerido: <strong>{analysisPreview.marca_sugerida} {analysisPreview.modelo_sugerido || ""}</strong>
+                    {analysisPreview.confianza_marca_modelo != null && (
+                      <> ({Math.round(analysisPreview.confianza_marca_modelo * 100)}%)</>
+                    )}
+                    {analysisPreview.metodo_marca_modelo && <> · Método: {analysisPreview.metodo_marca_modelo}</>}
                   </p>
                 )}
                 {analysisPreview.metodo_tipo && (

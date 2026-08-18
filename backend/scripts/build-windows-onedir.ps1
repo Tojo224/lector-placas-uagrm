@@ -24,7 +24,11 @@ if (Test-Path $modelStage) {
 }
 New-Item -ItemType Directory -Force -Path $modelStage | Out-Null
 foreach ($model in $manifest.models) {
-    $source = Join-Path $env:USERPROFILE $model.source
+    if ($model.source.StartsWith("repo:")) {
+        $source = Join-Path $root $model.source.Substring(5)
+    } else {
+        $source = Join-Path $env:USERPROFILE $model.source
+    }
     if (-not (Test-Path $source -PathType Leaf)) {
         throw "Falta el modelo requerido en el host de build: $source"
     }

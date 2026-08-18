@@ -13,6 +13,8 @@ Backend y base de coordinacion del proyecto "Lector de Placas UAGRM". El objetiv
   devuelve `DESCONOCIDO` cuando la prediccion no es confiable
 - Tipo vehicular: reutiliza la misma inferencia RF-DETR Nano y solo mapea las
   clases COCO `car`, `motorcycle`, `bus` y `truck` al catalogo activo
+- Marca/modelo vehicular: MobileNetV3 Large ONNX con 12 clases bolivianas;
+  reutiliza el recorte de la caja vehicular asociada por RF-DETR
 - Supervision: representacion, recorte y anotacion de detecciones
 - Captura automatica: agente separado para webcam USB o RTSP
 - Medios privados: Cloudinary autenticado con WebP y URLs temporales firmadas
@@ -103,12 +105,14 @@ Al cerrar una sesion:
   sedan, hatchback, pickup, minibus o furgoneta.
 - Persistir para tipo solo `tipo_sugerido_id`, `confianza_tipo` y `metodo_tipo`.
   Una sugerencia ambigua no selecciona ni registra automaticamente un vehiculo.
-- OpenCV evalua el color dentro de la caja asociada por RF-DETR. No existe un
-  regresor entrenado versionado; una imagen ambigua devuelve `DESCONOCIDO`. El
-  polling realtime no ejecuta RF-DETR ni color por frame.
+- OpenCV evalua el color dentro de la caja asociada por RF-DETR y el regresor
+  MobileNetV3-Small ONNX versionado respalda los casos ambiguos. Una prediccion
+  no confiable devuelve `DESCONOCIDO`. El polling realtime no ejecuta RF-DETR,
+  color ni marca/modelo por frame.
 - El catalogo de color es cerrado: BLANCO, NEGRO, GRIS, PLATEADO, ROJO, AZUL,
   VERDE, AMARILLO y MARRON. Un resultado dudoso nunca debe forzar una clase.
-- No implementar marca, modelo o tipo con CLIP sin una solicitud explicita.
+- Marca/modelo usa exclusivamente el clasificador ONNX versionado; no sustituirlo
+  por CLIP ni forzar una sugerencia que no supere sus umbrales.
 - Los tres campos persistidos son `color_sugerido`, `confianza_color` y
   `metodo_color`; no guardar arrays JSON de colores.
 - Preferir una ROI configurada para camaras fijas y reducir falsos positivos.

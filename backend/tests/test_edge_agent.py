@@ -9,9 +9,10 @@ from unittest.mock import MagicMock
 import cv2
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
+
 from edge_agent.app import create_edge_app
 from edge_agent.config import EdgeSettings
-from fastapi.testclient import TestClient
 
 
 def fixture_image_bytes() -> bytes:
@@ -44,6 +45,11 @@ class FakeVehicleDetector:
             confidence=0.95,
             bounding_box=SimpleNamespace(x1=20, y1=20, x2=300, y2=170),
         )]
+
+
+class FakeBrandModelClassifier:
+    def predict_crop(self, _crop):
+        return "Toyota", "Corolla", 0.91
 
 
 def test_edge_imports_without_database_or_cloudinary():
@@ -155,6 +161,7 @@ def test_edge_uses_shared_local_color_model_and_response_contract(tmp_path):
         EdgeSettings(data_dir=tmp_path),
         engine_factory=lambda _settings: plate_engine,
         color_engine_factory=lambda _settings: (FakeVehicleDetector(), None),
+        brand_engine_factory=lambda _settings: FakeBrandModelClassifier(),
     )
 
     with TestClient(app) as client:
@@ -166,9 +173,14 @@ def test_edge_uses_shared_local_color_model_and_response_contract(tmp_path):
         )
 
     assert health["color_ready"] is True
+    assert health["brand_model_ready"] is True
     assert response.status_code == 200
     payload = response.json()
     assert payload["color_sugerido"] == "AZUL"
     assert payload["color_hex"] == "#2355B4"
     assert payload["metodo_color"] == "OPENCV"
     assert isinstance(payload["confianza_color"], float)
+    assert payload["marca_sugerida"] == "Toyota"
+    assert payload["modelo_sugerido"] == "Corolla"
+    assert payload["confianza_marca_modelo"] == 0.91
+    assert payload["metodo_marca_modelo"] == "ONNX_MOBILENETV3"

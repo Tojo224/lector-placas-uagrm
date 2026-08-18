@@ -1,6 +1,26 @@
 # Entrega técnica del sistema de placas
 
-Fecha de corte: 2026-07-30.
+Fecha de corte: 2026-08-18.
+
+## Actualizacion de cierre 2026-08-18
+
+- Rama `main` contrastada con el remoto: antes del commit de esta entrega,
+  `HEAD` y `origin/main` coincidian en `1d38302`, sin commits por traer o subir.
+- Alembic tiene una sola cabeza, `f60718293a4b`; la base PostgreSQL/Neon
+  configurada esta aplicada en esa revision y `alembic check` no detecta
+  operaciones pendientes.
+- El clasificador MobileNetV3 de marca/modelo ya funciona tanto en el backend
+  central como en el agente Edge. El paquete Windows incluye grafo ONNX, pesos
+  externos y etiquetas con verificacion SHA-256.
+- Edge publica readiness/error del clasificador, devuelve la sugerencia en su
+  contrato y rechaza URLs del frontend Vite (`:5173`) como backend central.
+- La interfaz muestra marca/modelo sugeridos y amplia el espacio util de camara.
+- Verificacion final: **157 pruebas pasadas, 3 omitidas, 0 fallos**, compilacion
+  Python y build Vite correctos.
+
+Las referencias historicas posteriores que mencionan `c2d3e4f5a6b7`, CLIP como
+respaldo vigente o marca/modelo fuera del reconocimiento quedan reemplazadas por
+esta actualizacion.
 
 ## 1. Resumen ejecutivo
 
@@ -43,7 +63,8 @@ controles aplicables de OWASP ASVS. No está certificado por ISO.
 - validación y normalización de placa boliviana;
 - captura estática y polling `realtime=true`;
 - asociación placa-vehículo con una inferencia RF-DETR por captura estática;
-- sugerencia de color OpenCV con respaldo CLIP ONNX;
+- sugerencia de color OpenCV con respaldo MobileNetV3-Small ONNX;
+- sugerencia de marca/modelo MobileNetV3 Large ONNX en central y Edge;
 - sugerencia de tipo general RF-DETR contra catálogo activo;
 - solicitudes de vehículo desconocido con aprobación/rechazo y bloqueo de fila;
 - registro de accesos y estado dentro/fuera;
@@ -278,10 +299,10 @@ personales reales durante la demostración.
 - OCR completamente local con FastALPR/FastPlateOCR; EasyOCR fue reemplazado.
 - No se usa Roboflow Cloud; RF-DETR se ejecuta localmente mediante ONNX.
 - RF-DETR se ejecuta una vez por captura estática y se reutiliza.
-- OpenCV es el primer método de color; CLIP sólo respalda casos ambiguos.
+- OpenCV es el primer método de color; MobileNetV3-Small respalda casos ambiguos.
 - `DESCONOCIDO` es una salida correcta y segura.
 - Las sugerencias son editables y nunca registran vehículos por sí mismas.
-- Marca y modelo exacto quedan fuera del reconocimiento automático.
+- Marca y modelo se sugieren con MobileNetV3 y siempre requieren confirmación.
 - Cloudinary usa recursos autenticados y URLs de corta duración.
 - PostgreSQL es externo a la aplicación y Compose no crea una base.
 - Autorización y validaciones críticas se ejecutan en backend.

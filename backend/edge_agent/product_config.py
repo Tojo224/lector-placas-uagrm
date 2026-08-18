@@ -23,8 +23,16 @@ class ProductConfigStore:
         if not self.path.is_file():
             return ProductConfig()
         payload = json.loads(self.path.read_text(encoding="utf-8"))
+        stored_url = str(payload.get("central_url") or "").strip() or None
+        try:
+            central_url = validate_central_url(stored_url) if stored_url else None
+        except ValueError:
+            # Older development builds allowed the Vite frontend URL here. Keep
+            # the installation identity but disable sync until a real backend is
+            # configured, instead of retrying forever against the UI server.
+            central_url = None
         return ProductConfig(
-            central_url=str(payload.get("central_url") or "").strip() or None,
+            central_url=central_url,
             installation_id=(
                 str(payload.get("installation_id") or "").strip() or None
             ),
@@ -79,4 +87,9 @@ def validate_central_url(value: str) -> str:
         raise ValueError("La URL central no es valida.")
     if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "localhost"}:
         raise ValueError("La URL central productiva debe usar HTTPS.")
+    if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port == 5173:
+        raise ValueError(
+            "La URL apunta al frontend Vite (puerto 5173), no al backend central. "
+            "Para desarrollo local usa http://127.0.0.1:8000."
+        )
     return normalized

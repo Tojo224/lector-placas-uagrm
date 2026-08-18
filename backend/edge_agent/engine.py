@@ -34,6 +34,35 @@ def vehicle_model_path() -> Path | None:
     return development_path if development_path.is_file() else None
 
 
+def brand_model_paths() -> tuple[Path, Path] | None:
+    """Resolve the bundled or development brand/model classifier artifacts."""
+    candidates = (
+        resource_path("resources", "models"),
+        resource_path("models"),
+    )
+    for model_dir in candidates:
+        model = model_dir / "brand-model-v4-bolivia12.onnx"
+        labels = model_dir / "brand-model-v4-bolivia12.labels.json"
+        external_data = model_dir / "brand-model-v4-bolivia12.onnx.data"
+        if all(path.is_file() for path in (model, labels, external_data)):
+            return model, labels
+    return None
+
+
+def create_brand_model_engine(settings: EdgeSettings) -> Any:
+    paths = brand_model_paths()
+    if paths is None:
+        raise FileNotFoundError("Modelo local de marca/modelo no disponible")
+    from app.services.vehicle_brand_model import BrandModelClassifier
+
+    model_path, labels_path = paths
+    return BrandModelClassifier(
+        model_path,
+        labels_path,
+        providers=[settings.execution_provider],
+    )
+
+
 def create_color_engine(settings: EdgeSettings) -> tuple[Any, Any]:
     """Load the same RF-DETR + OpenCV color services used by central, offline."""
     detector_path = vehicle_model_path()
@@ -63,11 +92,10 @@ def create_ocr_engine(settings: EdgeSettings) -> Any:
     providers = [settings.execution_provider]
     model_paths = bundled_model_paths()
     if model_paths:
+        import onnxruntime as ort
         from fast_alpr.default_detector import DefaultDetector
         from fast_alpr.default_ocr import DefaultOCR
         from open_image_models.detection.factory import create_detector
-
-        import onnxruntime as ort
 
         detector_path, ocr_path, config_path = model_paths
         session_times: list[float] = []

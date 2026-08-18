@@ -1,5 +1,18 @@
 # HEARTBEAT
 
+- **Estado vigente - 2026-08-18 - Edge actualizado, migraciones y release local verificados**
+  - `main` fue contrastada con `origin/main`: antes del commit de cierre estaba
+    en `1d38302` y no tenia commits pendientes de traer ni publicar.
+  - La base PostgreSQL/Neon configurada esta en la unica cabeza Alembic
+    `f60718293a4b`; `alembic check` informa que no hay operaciones pendientes.
+  - El Edge Agent carga y empaqueta el clasificador MobileNetV3 de marca/modelo,
+    publica su readiness y devuelve marca, modelo, confianza y metodo en capturas
+    confirmadas. La UI muestra la sugerencia y amplia el espacio de camara.
+  - La configuracion Edge rechaza URLs del frontend Vite en el puerto 5173 como
+    backend central y desactiva de forma segura URLs legacy invalidas.
+  - Verificacion determinista completa: **157 pasadas, 3 omitidas, 0 fallos**;
+    compilacion Python, dependencias de vision y build Vite correctos.
+
 - **Estado vigente - 2026-08-17 - Integración de Detector de Marca y Modelo Vehicular ONNX (v4)**
   - Integrado clasificador [BrandModelClassifier](file:///d:/Observatorio%20IA/placa/backend/app/services/vehicle_brand_model.py) basado en `onnxruntime` con los pesos pre-entrenados del modelo MobileNetV3 Large `brand-model-v4-bolivia12.onnx` y `brand-model-v4-bolivia12.labels.json` (12 clases vehiculares de Bolivia: Captiva, Tucson, Cerato, Sorento, Qashqai, Tiida, X-Trail, Alto, Jimny, Camry, Corolla, RAV4).
   - Conectado a la inferencia del backend central en `main.py` y `plate_analysis.py`, reutilizando la caja vehicular obtenida por RF-DETR.

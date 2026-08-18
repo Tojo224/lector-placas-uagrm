@@ -1,5 +1,9 @@
 # Backlog
 
+- `EDGE-BRAND-MODEL-001` | `done` | Prioridad `alta` | Empaquetar e integrar en Edge el clasificador ONNX de marca/modelo, health, contrato y visualizacion | Dependencias: `BRAND-MODEL-001`, `EDGE-PHASE8-001`
+- `EDGE-CENTRAL-URL-001` | `done` | Prioridad `alta` | Rechazar el frontend Vite como backend central y sanear configuraciones legacy sin perder identidad | Dependencias: `EDGE-PHASE9-001`
+- `MIGRATION-AUDIT-20260818` | `done` | Prioridad `alta` | Verificar cabeza unica local/Neon `f60718293a4b` y ausencia de operaciones Alembic pendientes | Dependencias: ninguna
+
 - `EDGE-PHASE1-001` | `done` | Prioridad `alta` | Desacoplar de plates.py el analisis OCR/vehicular, decision de acceso y actuador de barrera sin cambiar contratos ni persistencia | Dependencias: ninguna
 - `EDGE-PHASE2-001` | `done` | Prioridad `alta` | Crear Edge Agent OCR local con API, configuracion independiente, modo offline y health sin SQLite ni sincronizacion | Dependencias: `EDGE-PHASE1-001`
 - `EDGE-PHASE3-001` | `done` | Prioridad `alta` | Agregar SQLite operativo, migraciones locales y repositorios durables al Edge Agent | Dependencias: `EDGE-PHASE2-001`
